@@ -6,7 +6,17 @@ use walkdir::WalkDir;
 
 const PACKAGE_JSON_PATH: &str = "package.json";
 const EXTENSIONS: [&str; 4] = ["js", "ts", "jsx", "tsx"];
-const IGNORE_FOLDERS: [&str; 4] = ["node_modules", "dist", "build", "public"];
+const IGNORE_FOLDERS: [&str; 9] = [
+    "node_modules",
+    "dist",
+    "build",
+    "public",
+    ".next",
+    ".git",
+    "coverage",
+    "cypress",
+    "test",
+];
 
 fn main() {
     let matches = Command::new("cnp")
@@ -33,7 +43,7 @@ fn main() {
     let dependencies = extract_dependencies(&package_json);
     println!("Dependencies found: {}", dependencies.len());
 
-    // search for JavaScript/TypeScript files in the project directory
+    // search for files in the project directory
     let project_files = find_files(".");
     println!("Files found: {} (showing 5 samples)", project_files.len());
     for file in project_files.iter().take(5) {
@@ -81,13 +91,22 @@ fn find_files(directory: &str) -> Vec<String> {
     let mut files = Vec::new();
     for entry in WalkDir::new(directory).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.is_dir() && IGNORE_FOLDERS.iter().any(|&folder| path.ends_with(folder)) {
-            println!("Ignoring folder: {}", path.display());
-            continue;
-        }
-        if let Some(ext) = path.extension() {
-            if EXTENSIONS.contains(&ext.to_str().unwrap()) {
-                files.push(path.to_str().unwrap().to_string());
+        if path.is_dir() {
+            if IGNORE_FOLDERS.iter().any(|&folder| path.ends_with(folder)) {
+                continue;
+            }
+        } else {
+            if path.ancestors().any(|ancestor| {
+                IGNORE_FOLDERS
+                    .iter()
+                    .any(|&folder| ancestor.ends_with(folder))
+            }) {
+                continue;
+            }
+            if let Some(ext) = path.extension() {
+                if EXTENSIONS.contains(&ext.to_str().unwrap()) {
+                    files.push(path.to_str().unwrap().to_string());
+                }
             }
         }
     }

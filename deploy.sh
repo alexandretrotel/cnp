@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Format the code
+cargo fmt
+
 # Build and compile the Rust program
 cargo build --release
 
