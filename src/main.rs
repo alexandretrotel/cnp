@@ -1,3 +1,4 @@
+use clap::Command;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -7,14 +8,25 @@ const PACKAGE_JSON_PATH: &str = "package.json";
 const JS_TS_GLOB: &str = "**/*.{js,ts,jsx,tsx}";
 
 fn main() {
+    let matches = Command::new("cnp")
+        .version("1.0.0")
+        .author("Alexandre Trotel")
+        .about("Checks for unused dependencies in a project")
+        .get_matches();
+
+    if matches.contains_id("version") {
+        println!("cnp version 1.0.0");
+        return;
+    }
+
     // read package.json file into a string
-    let package_json_path = fs::canonicalize(PACKAGE_JSON_PATH)
-        .expect("Failed to find package.json");
-    let package_json_content = fs::read_to_string(package_json_path)
-        .expect("Failed to read package.json");
+    let package_json_path =
+        fs::canonicalize(PACKAGE_JSON_PATH).expect("Failed to find package.json");
+    let package_json_content =
+        fs::read_to_string(package_json_path).expect("Failed to read package.json");
     // parse package.json content into a JSON Value
-    let package_json: Value = serde_json::from_str(&package_json_content)
-        .expect("Invalid JSON in package.json");
+    let package_json: Value =
+        serde_json::from_str(&package_json_content).expect("Invalid JSON in package.json");
 
     // extract dependencies from the parsed package.json
     let dependencies = extract_dependencies(&package_json);
@@ -40,8 +52,12 @@ fn main() {
     }
 
     // show completion progress
-    let completion_percentage = (unused_dependencies.len() as f64 / dependencies.len() as f64) * 100.0;
-    println!("Progress: {:.2}% of dependencies are unused.", completion_percentage);
+    let completion_percentage =
+        (unused_dependencies.len() as f64 / dependencies.len() as f64) * 100.0;
+    println!(
+        "Progress: {:.2}% of dependencies are unused.",
+        completion_percentage
+    );
 }
 
 /// extract dependencies from package.json, including devDependencies
