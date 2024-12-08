@@ -5,7 +5,8 @@ use std::fs;
 use walkdir::WalkDir;
 
 const PACKAGE_JSON_PATH: &str = "package.json";
-const JS_TS_GLOB: &str = "**/*.{js,ts,jsx,tsx}";
+const EXTENSIONS: [&str; 4] = ["js", "ts", "jsx", "tsx"];
+const IGNORE_FOLDERS: [&str; 4] = ["node_modules", "dist", "build", "public"];
 
 fn main() {
     let matches = Command::new("cnp")
@@ -33,7 +34,7 @@ fn main() {
     println!("Dependencies found: {}", dependencies.len());
 
     // search for JavaScript/TypeScript files in the project directory
-    let project_files = find_js_ts_files(".");
+    let project_files = find_files(".");
     println!("Files found: {} (showing 5 samples)", project_files.len());
     for file in project_files.iter().take(5) {
         println!("- {}", file);
@@ -75,19 +76,18 @@ fn extract_dependencies(package_json: &Value) -> HashSet<String> {
     dependencies
 }
 
-/// search for .js and .ts files in the given directory and subdirectories
-fn find_js_ts_files(directory: &str) -> Vec<String> {
+/// search for files that matches the JS_TS_GLOB pattern in the given directory
+fn find_files(directory: &str) -> Vec<String> {
     let mut files = Vec::new();
-    for entry in WalkDir::new(directory) {
-        if let Ok(entry) = entry {
-            let path = entry.path();
-            // check if the file extension is .js or .ts using JS_TS_GLOB
-            if let Some(ext) = path.extension() {
-                if let Some(ext_str) = ext.to_str() {
-                    if JS_TS_GLOB.contains(&format!("*.{}", ext_str)) {
-                        files.push(path.to_string_lossy().into_owned());
-                    }
-                }
+    for entry in WalkDir::new(directory).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.is_dir() && IGNORE_FOLDERS.iter().any(|&folder| path.ends_with(folder)) {
+            println!("Ignoring folder: {}", path.display());
+            continue;
+        }
+        if let Some(ext) = path.extension() {
+            if EXTENSIONS.contains(&ext.to_str().unwrap()) {
+                files.push(path.to_str().unwrap().to_string());
             }
         }
     }
