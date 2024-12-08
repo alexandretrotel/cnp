@@ -1,4 +1,4 @@
-use clap::Command;
+use clap::{Arg, Command};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -17,40 +17,50 @@ const IGNORE_FOLDERS: [&str; 9] = [
     "cypress",
     "test",
 ];
+const VERSION: &str = "0.2.0";
 
 fn main() {
     let matches = Command::new("cnp")
-        .version("1.0.0")
+        .version(VERSION)
         .author("Alexandre Trotel")
         .about("Checks for unused dependencies in a project")
+        .arg(
+            Arg::new("clean")
+                .long("clean")
+                .action(clap::ArgAction::SetTrue)
+                .help("Remove unused dependencies from package.json"),
+        )
         .get_matches();
 
-    if matches.contains_id("version") {
-        println!("cnp version 1.0.0");
-        return;
-    }
+    let package_json_path = fs::canonicalize(PACKAGE_JSON_PATH).unwrap_or_else(|_| {
+        panic!(
+            "Failed to find package.json at the expected path: {}",
+            PACKAGE_JSON_PATH
+        )
+    });
+    let package_json_content = fs::read_to_string(&package_json_path).unwrap_or_else(|_| {
+        panic!(
+            "Failed to read package.json at path: {}",
+            package_json_path.display()
+        )
+    });
+    let mut package_json: Value =
+        serde_json::from_str(&package_json_content).unwrap_or_else(|_| {
+            panic!(
+                "Invalid JSON format in package.json at path: {}",
+                package_json_path.display()
+            )
+        });
 
-    // read package.json file into a string
-    let package_json_path =
-        fs::canonicalize(PACKAGE_JSON_PATH).expect("Failed to find package.json");
-    let package_json_content =
-        fs::read_to_string(package_json_path).expect("Failed to read package.json");
-    // parse package.json content into a JSON Value
-    let package_json: Value =
-        serde_json::from_str(&package_json_content).expect("Invalid JSON in package.json");
-
-    // extract dependencies from the parsed package.json
     let dependencies = extract_dependencies(&package_json);
     println!("Dependencies found: {}", dependencies.len());
 
-    // search for files in the project directory
     let project_files = find_files(".");
     println!("Files found: {} (showing 5 samples)", project_files.len());
     for file in project_files.iter().take(5) {
         println!("- {}", file);
     }
 
-    // check which dependencies are unused by scanning project files
     let unused_dependencies = find_unused_dependencies(&dependencies, &project_files);
     println!("Unused dependencies: {}", unused_dependencies.len());
     if !unused_dependencies.is_empty() {
@@ -62,7 +72,24 @@ fn main() {
         println!("All dependencies are used.");
     }
 
-    // show completion progress
+    if matches.contains_id("clean") {
+        // clean unused dependencies
+        clean_unused_dependencies(&mut package_json, &unused_dependencies);
+        // write the modified package.json
+        fs::write(
+            &package_json_path,
+            serde_json::to_string_pretty(&package_json)
+                .unwrap_or_else(|_| panic!("Failed to serialize modified package.json to string")),
+        )
+        .unwrap_or_else(|_| {
+            panic!(
+                "Failed to write modified package.json at path: {}",
+                package_json_path.display()
+            )
+        });
+        println!("Cleaned unused dependencies.");
+    }
+
     let completion_percentage =
         (unused_dependencies.len() as f64 / dependencies.len() as f64) * 100.0;
     println!(
@@ -71,14 +98,12 @@ fn main() {
     );
 }
 
-/// extract dependencies from package.json, including devDependencies
+/// extract dependencies from package.json
 fn extract_dependencies(package_json: &Value) -> HashSet<String> {
     let mut dependencies = HashSet::new();
     if let Value::Object(map) = package_json {
-        // look for both dependencies and devDependencies
-        for key in ["dependencies", "devDependencies"] {
+        for key in ["dependencies"] {
             if let Some(Value::Object(deps)) = map.get(key) {
-                // collect the keys (dependency names)
                 dependencies.extend(deps.keys().cloned());
             }
         }
@@ -119,7 +144,6 @@ fn find_unused_dependencies(dependencies: &HashSet<String>, files: &[String]) ->
     for file in files {
         if let Ok(content) = fs::read_to_string(file) {
             for dep in dependencies {
-                // if a dependency is found in the file, remove it from unused
                 if content.contains(dep) {
                     unused.remove(dep);
                 }
@@ -127,4 +151,15 @@ fn find_unused_dependencies(dependencies: &HashSet<String>, files: &[String]) ->
         }
     }
     unused
+}
+
+/// clean the unused dependencies from the package.json
+fn clean_unused_dependencies(package_json: &mut Value, unused_dependencies: &HashSet<String>) {
+    if let Value::Object(map) = package_json {
+        if let Some(Value::Object(deps)) = map.get_mut("dependencies") {
+            for dep in unused_dependencies {
+                deps.remove(dep);
+            }
+        }
+    }
 }
