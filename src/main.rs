@@ -130,11 +130,6 @@ fn main() {
     // prune unused dependencies
     if !unused_dependencies.is_empty() {
         handle_unused_dependencies(&unused_dependencies, dry_run);
-
-        // reinstall dependencies
-        if !dry_run {
-            reinstall_modules();
-        }
     }
 }
 
@@ -184,12 +179,18 @@ fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool) {
             println!("{}", "Aborted!".red());
             return;
         }
+
         for dep in unused_dependencies {
             if uninstall_dependency(dep, &detect_package_manager()) {
                 println!("{} {}", "Deleted:".green(), dep.green());
             } else {
                 println!("{} {}", "Failed to delete:".red(), dep.red());
             }
+        }
+
+        // reinstall dependencies
+        if !dry_run {
+            reinstall_modules();
         }
     }
 }
