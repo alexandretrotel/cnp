@@ -1,9 +1,9 @@
 [package]
 name = "cnp"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-clap = "4.5.23"
 serde_json = "1.0.133"
-walkdir = "2.5.0"
+glob = "0.3.2"
+colored = "2.0"

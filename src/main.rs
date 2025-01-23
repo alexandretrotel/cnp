@@ -1,12 +1,11 @@
-use clap::{Arg, Command};
+use colored::*;
+use glob::glob;
 use serde_json::Value;
-use std::collections::HashSet;
-use std::fs;
-use walkdir::WalkDir;
+use std::{collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
 
 const PACKAGE_JSON_PATH: &str = "package.json";
-const EXTENSIONS: [&str; 4] = ["js", "ts", "jsx", "tsx"];
-const IGNORE_FOLDERS: [&str; 9] = [
+const EXTENSIONS: &str = "**/*.{js,ts,jsx,tsx,mdx}";
+const IGNORE_FOLDERS: [&str; 10] = [
     "node_modules",
     "dist",
     "build",
@@ -16,150 +15,170 @@ const IGNORE_FOLDERS: [&str; 9] = [
     "coverage",
     "cypress",
     "test",
+    "output",
 ];
-const VERSION: &str = "0.2.0";
 
 fn main() {
-    let matches = Command::new("cnp")
-        .version(VERSION)
-        .author("Alexandre Trotel")
-        .about("Checks for unused dependencies in a project")
-        .arg(
-            Arg::new("clean")
-                .long("clean")
-                .action(clap::ArgAction::SetTrue)
-                .help("Remove unused dependencies from package.json"),
-        )
-        .get_matches();
+    let dry_run = std::env::args().any(|arg| arg == "--dry-run");
 
-    let package_json_path = fs::canonicalize(PACKAGE_JSON_PATH).unwrap_or_else(|_| {
-        panic!(
-            "Failed to find package.json at the expected path: {}",
-            PACKAGE_JSON_PATH
-        )
-    });
-    let package_json_content = fs::read_to_string(&package_json_path).unwrap_or_else(|_| {
-        panic!(
-            "Failed to read package.json at path: {}",
-            package_json_path.display()
-        )
-    });
-    let mut package_json: Value =
-        serde_json::from_str(&package_json_content).unwrap_or_else(|_| {
-            panic!(
-                "Invalid JSON format in package.json at path: {}",
-                package_json_path.display()
-            )
-        });
+    // read package.json
+    let package_json: Value = match fs::read_to_string(PACKAGE_JSON_PATH) {
+        Ok(content) => serde_json::from_str(&content).expect("Invalid JSON in package.json"),
+        Err(_) => {
+            eprintln!("Error: `package.json` not found.");
+            return;
+        }
+    };
 
-    let dependencies = extract_dependencies(&package_json);
-    println!("Dependencies found: {}", dependencies.len());
+    // collect dependencies
+    let dependencies = package_json
+        .get("dependencies")
+        .and_then(Value::as_object)
+        .map_or_else(|| serde_json::Map::new(), |map| map.clone())
+        .keys()
+        .cloned()
+        .collect::<HashSet<_>>();
 
-    let project_files = find_files(".");
-    println!("Files found: {} (showing 5 samples)", project_files.len());
-    for file in project_files.iter().take(5) {
-        println!("- {}", file);
+    // used dependencies
+    let mut used_packages = HashSet::new();
+    let mut ignored_files = Vec::new();
+    for entry in glob(EXTENSIONS).expect("Failed to read glob pattern") {
+        if let Ok(path) = entry {
+            if should_ignore(&path) {
+                ignored_files.push(path.display().to_string());
+                continue;
+            }
+
+            if let Ok(content) = fs::read_to_string(path) {
+                for dep in &dependencies {
+                    if content.contains(dep) {
+                        used_packages.insert(dep.clone());
+                    }
+                }
+            }
+        }
     }
 
-    let unused_dependencies = find_unused_dependencies(&dependencies, &project_files);
-    println!("Unused dependencies: {}", unused_dependencies.len());
+    // identify unused dependencies
+    let unused_dependencies: Vec<_> = dependencies.difference(&used_packages).cloned().collect();
+
+    // print unused dependencies
+    println!("{}", "\nDependency Usage Report".bold().blue());
+    println!("{}", "------------------------".blue());
+    println!("{}: {}", "Project".bold(), PACKAGE_JSON_PATH);
+    println!("{}: {}", "Extensions".bold(), EXTENSIONS);
+    println!(
+        "{}: {}",
+        "Ignored Folders".bold(),
+        IGNORE_FOLDERS.join(", ")
+    );
+    println!("{}: {}", "Package Manager".bold(), detect_package_manager());
+    println!("{}: {}", "Total dependencies".bold(), dependencies.len());
+    println!(
+        "{}: {}",
+        "Used dependencies".bold().green(),
+        used_packages.len()
+    );
+    println!(
+        "{}: {}",
+        "Unused dependencies".bold().red(),
+        unused_dependencies.len()
+    );
+
     if !unused_dependencies.is_empty() {
-        println!("Showing first 5 unused dependencies:");
-        for dep in unused_dependencies.iter().take(5) {
-            println!("- {}", dep);
+        println!("\n{}", "Unused Dependencies:".red().bold());
+        for dep in &unused_dependencies {
+            println!("- {}", dep.red());
         }
     } else {
-        println!("All dependencies are used.");
+        println!("{}", "\nNo unused dependencies found!".green());
     }
 
-    if matches.contains_id("clean") {
-        // clean unused dependencies
-        clean_unused_dependencies(&mut package_json, &unused_dependencies);
-        // write the modified package.json
-        fs::write(
-            &package_json_path,
-            serde_json::to_string_pretty(&package_json)
-                .unwrap_or_else(|_| panic!("Failed to serialize modified package.json to string")),
-        )
-        .unwrap_or_else(|_| {
-            panic!(
-                "Failed to write modified package.json at path: {}",
-                package_json_path.display()
-            )
-        });
-        println!("Cleaned unused dependencies.");
+    // display ignored files and folders
+    if !ignored_files.is_empty() {
+        println!("\n{}", "Ignored Files and Folders:".yellow().bold());
+        for file in ignored_files {
+            println!("- {}", file.yellow());
+        }
     }
 
-    let completion_percentage =
-        (unused_dependencies.len() as f64 / dependencies.len() as f64) * 100.0;
+    // prune unused dependencies
+    if !unused_dependencies.is_empty() {
+        handle_unused_dependencies(&unused_dependencies, dry_run);
+    }
+}
+
+fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool) {
+    if dry_run {
+        println!(
+            "{}",
+            "\nDry-run mode enabled. The following dependencies would be deleted:".yellow()
+        );
+        for dep in unused_dependencies {
+            println!("- {}", dep.yellow());
+        }
+    } else {
+        println!(
+            "{}",
+            "\nProceeding to delete the unused dependencies..."
+                .red()
+                .bold()
+        );
+
+        if !ask_for_confirmation() {
+            println!("{}", "Aborted!".red());
+            return;
+        }
+        for dep in unused_dependencies {
+            if uninstall_dependency(dep, &detect_package_manager()) {
+                println!("{} {}", "Deleted:".green(), dep.green());
+            } else {
+                println!("{} {}", "Failed to delete:".red(), dep.red());
+            }
+        }
+    }
+}
+
+fn detect_package_manager() -> String {
+    if Path::new("pnpm-lock.yaml").exists() {
+        "pnpm".to_string()
+    } else if Path::new("yarn.lock").exists() {
+        "yarn".to_string()
+    } else if Path::new("bun.lockb").exists() {
+        "bun".to_string()
+    } else {
+        "npm".to_string()
+    }
+}
+
+fn ask_for_confirmation() -> bool {
     println!(
-        "Progress: {:.2}% of dependencies are unused.",
-        completion_percentage
+        "{}",
+        "Are you sure you want to delete the unused dependencies? (yes/no)"
+            .yellow()
+            .bold()
     );
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read input");
+    input.trim().to_lowercase() == "yes"
 }
 
-/// extract dependencies from package.json
-fn extract_dependencies(package_json: &Value) -> HashSet<String> {
-    let mut dependencies = HashSet::new();
-    if let Value::Object(map) = package_json {
-        for key in ["dependencies"] {
-            if let Some(Value::Object(deps)) = map.get(key) {
-                dependencies.extend(deps.keys().cloned());
-            }
-        }
+fn uninstall_dependency(dependency: &str, package_manager: &str) -> bool {
+    let output = Command::new(package_manager)
+        .args(&["uninstall", dependency])
+        .output();
+
+    match output {
+        Ok(result) if result.status.success() => true,
+        _ => false,
     }
-    dependencies
 }
 
-/// search for files that matches the JS_TS_GLOB pattern in the given directory
-fn find_files(directory: &str) -> Vec<String> {
-    let mut files = Vec::new();
-    for entry in WalkDir::new(directory).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_dir() {
-            if IGNORE_FOLDERS.iter().any(|&folder| path.ends_with(folder)) {
-                continue;
-            }
-        } else {
-            if path.ancestors().any(|ancestor| {
-                IGNORE_FOLDERS
-                    .iter()
-                    .any(|&folder| ancestor.ends_with(folder))
-            }) {
-                continue;
-            }
-            if let Some(ext) = path.extension() {
-                if EXTENSIONS.contains(&ext.to_str().unwrap()) {
-                    files.push(path.to_str().unwrap().to_string());
-                }
-            }
-        }
-    }
-    files
-}
-
-/// check each project file for dependency usage and identify unused ones
-fn find_unused_dependencies(dependencies: &HashSet<String>, files: &[String]) -> HashSet<String> {
-    let mut unused = dependencies.clone();
-    for file in files {
-        if let Ok(content) = fs::read_to_string(file) {
-            for dep in dependencies {
-                if content.contains(dep) {
-                    unused.remove(dep);
-                }
-            }
-        }
-    }
-    unused
-}
-
-/// clean the unused dependencies from the package.json
-fn clean_unused_dependencies(package_json: &mut Value, unused_dependencies: &HashSet<String>) {
-    if let Value::Object(map) = package_json {
-        if let Some(Value::Object(deps)) = map.get_mut("dependencies") {
-            for dep in unused_dependencies {
-                deps.remove(dep);
-            }
-        }
-    }
+fn should_ignore(path: &Path) -> bool {
+    IGNORE_FOLDERS.iter().any(|folder| {
+        path.components()
+            .any(|component| component.as_os_str() == OsStr::new(folder))
+    })
 }
