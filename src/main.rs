@@ -130,11 +130,11 @@ fn main() {
     // prune unused dependencies
     if !unused_dependencies.is_empty() {
         handle_unused_dependencies(&unused_dependencies, dry_run);
-    }
 
-    // reinstall dependencies
-    if !dry_run {
-        reinstall_modules();
+        // reinstall dependencies
+        if !dry_run {
+            reinstall_modules();
+        }
     }
 }
 
