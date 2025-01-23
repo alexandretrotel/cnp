@@ -1,10 +1,11 @@
 use colored::*;
 use glob::glob;
+use regex::Regex;
 use serde_json::Value;
 use std::{cmp::min, collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
 
 const PACKAGE_JSON_PATH: &str = "package.json";
-const EXTENSIONS: &str = "**/*.{js,ts,jsx,tsx,mdx}";
+const EXTENSIONS: [&str; 5] = ["js", "ts", "jsx", "tsx", "mdx"];
 const MAX_EXPLORED_FILES: usize = 5;
 const IGNORE_FOLDERS: [&str; 10] = [
     "node_modules",
@@ -20,7 +21,14 @@ const IGNORE_FOLDERS: [&str; 10] = [
 ];
 
 fn main() {
+    // dry-run mode
     let dry_run = std::env::args().any(|arg| arg == "--dry-run");
+
+    // glob patterns
+    let patterns: Vec<String> = EXTENSIONS
+        .iter()
+        .flat_map(|ext| vec![format!("*.{}", ext), format!("**/*.{}", ext)])
+        .collect();
 
     // read package.json
     let package_json: Value = match fs::read_to_string(PACKAGE_JSON_PATH) {
@@ -44,22 +52,28 @@ fn main() {
     let mut used_packages = HashSet::new();
     let mut ignored_files = Vec::new();
     let mut explored_files = Vec::new();
-    for entry in glob(EXTENSIONS).expect("Failed to read glob pattern") {
-        if let Ok(path) = entry {
-            if should_ignore(&path) {
-                ignored_files.push(path.display().to_string());
-                continue;
-            }
 
-            if let Ok(content) = fs::read_to_string(&path) {
-                for dep in &dependencies {
-                    if content.contains(dep) {
-                        used_packages.insert(dep.clone());
+    for pattern in &patterns {
+        for entry in glob(pattern).expect("Failed to read glob pattern") {
+            if let Ok(path) = entry {
+                if path.is_dir() || path.is_symlink() {
+                    if should_ignore(&path) {
+                        ignored_files.push(path.display().to_string());
+                        continue;
                     }
                 }
-            }
 
-            explored_files.push(path.display().to_string());
+                if should_ignore(&path) {
+                    ignored_files.push(path.display().to_string());
+                    continue;
+                }
+
+                if let Ok(content) = fs::read_to_string(&path) {
+                    used_packages.extend(find_dependencies_in_content(&content, &dependencies));
+                }
+
+                explored_files.push(path.display().to_string());
+            }
         }
     }
 
@@ -70,7 +84,7 @@ fn main() {
     println!("{}", "\nDependency Usage Report".bold().blue());
     println!("{}", "------------------------".blue());
     println!("{}: {}", "Project".bold(), PACKAGE_JSON_PATH);
-    println!("{}: {}", "Extensions".bold(), EXTENSIONS);
+    println!("{}: {:?}", "Extensions".bold(), EXTENSIONS);
     println!(
         "{}: {}",
         "Ignored Folders".bold(),
@@ -95,6 +109,15 @@ fn main() {
         unused_dependencies.len()
     );
 
+    if !used_packages.is_empty() {
+        println!("\n{}", "Used Dependencies:".green().bold());
+        for dep in &used_packages {
+            println!("- {}", dep.green());
+        }
+    } else {
+        println!("{}", "\nNo used dependencies found!".red());
+    }
+
     if !unused_dependencies.is_empty() {
         println!("\n{}", "Unused Dependencies:".red().bold());
         for dep in &unused_dependencies {
@@ -104,17 +127,39 @@ fn main() {
         println!("{}", "\nNo unused dependencies found!".green());
     }
 
-    // display ignored files and folders
-    if !ignored_files.is_empty() {
-        println!("\n{}", "Ignored Files and Folders:".yellow().bold());
-        for file in ignored_files {
-            println!("- {}", file.yellow());
-        }
-    }
-
     // prune unused dependencies
     if !unused_dependencies.is_empty() {
         handle_unused_dependencies(&unused_dependencies, dry_run);
+    }
+
+    // reinstall dependencies
+    if !dry_run {
+        reinstall_modules();
+    }
+}
+
+fn reinstall_modules() {
+    println!("{}", "Reinstalling node_modules...".yellow());
+
+    let node_modules_path = Path::new("node_modules");
+    if node_modules_path.exists() {
+        if let Err(e) = fs::remove_dir_all(node_modules_path) {
+            eprintln!("Failed to remove node_modules: {}", e);
+            return;
+        }
+        println!("{}", "Deleted node_modules".green());
+    }
+
+    let package_manager = detect_package_manager();
+    let result = Command::new(package_manager).arg("install").output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            println!("{}", "Reinstallation successful!".green());
+        }
+        _ => {
+            eprintln!("{}", "Failed to reinstall dependencies".red());
+        }
     }
 }
 
@@ -173,6 +218,19 @@ fn ask_for_confirmation() -> bool {
         .read_line(&mut input)
         .expect("Failed to read input");
     input.trim().to_lowercase() == "yes"
+}
+
+fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
+    let mut found = HashSet::new();
+    for dep in dependencies {
+        let regex = Regex::new(&format!(r#"[\"']{}[\"']"#, regex::escape(dep))).unwrap();
+        let require_regex =
+            Regex::new(&format!(r#"require\([\"']{}[\"']\)"#, regex::escape(dep))).unwrap();
+        if regex.is_match(content) || require_regex.is_match(content) {
+            found.insert(dep.clone());
+        }
+    }
+    found
 }
 
 fn uninstall_dependency(dependency: &str, package_manager: &str) -> bool {
