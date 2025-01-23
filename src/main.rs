@@ -1,10 +1,11 @@
 use colored::*;
 use glob::glob;
 use serde_json::Value;
-use std::{collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
+use std::{cmp::min, collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
 
 const PACKAGE_JSON_PATH: &str = "package.json";
 const EXTENSIONS: &str = "**/*.{js,ts,jsx,tsx,mdx}";
+const MAX_EXPLORED_FILES: usize = 5;
 const IGNORE_FOLDERS: [&str; 10] = [
     "node_modules",
     "dist",
@@ -42,6 +43,7 @@ fn main() {
     // used dependencies
     let mut used_packages = HashSet::new();
     let mut ignored_files = Vec::new();
+    let mut explored_files = Vec::new();
     for entry in glob(EXTENSIONS).expect("Failed to read glob pattern") {
         if let Ok(path) = entry {
             if should_ignore(&path) {
@@ -49,13 +51,15 @@ fn main() {
                 continue;
             }
 
-            if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(content) = fs::read_to_string(&path) {
                 for dep in &dependencies {
                     if content.contains(dep) {
                         used_packages.insert(dep.clone());
                     }
                 }
             }
+
+            explored_files.push(path.display().to_string());
         }
     }
 
@@ -71,6 +75,12 @@ fn main() {
         "{}: {}",
         "Ignored Folders".bold(),
         IGNORE_FOLDERS.join(", ")
+    );
+    println!("{}: {}", "Explored Files".bold(), explored_files.len());
+    println!(
+        "{}: {}",
+        "Some Explored Files".bold(),
+        explored_files[..min(MAX_EXPLORED_FILES, explored_files.len())].join(", ")
     );
     println!("{}: {}", "Package Manager".bold(), detect_package_manager());
     println!("{}: {}", "Total dependencies".bold(), dependencies.len());
