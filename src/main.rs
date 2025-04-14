@@ -243,16 +243,14 @@ fn should_ignore(path: &Path) -> bool {
 }
 
 fn get_required_dependencies() -> HashSet<String> {
-    // Read package-lock.json
     let mut required = HashSet::new();
+
+    // Read package-lock.json
     if let Ok(content) = fs::read_to_string("package-lock.json") {
         if let Ok(lock) = serde_json::from_str::<Value>(&content) {
             if let Some(deps) = lock.get("dependencies").and_then(|v| v.as_object()) {
-                for (dep, info) in deps {
+                for dep in deps.keys() {
                     required.insert(dep.clone());
-                    if let Some(peer) = info.get("peerDependencies").and_then(|v| v.as_object()) {
-                        required.extend(peer.keys().cloned());
-                    }
                 }
             }
         }
@@ -261,47 +259,42 @@ fn get_required_dependencies() -> HashSet<String> {
     // Read yarn.lock
     if let Ok(content) = fs::read_to_string("yarn.lock") {
         for line in content.lines() {
-            if line.starts_with('#') || line.trim().is_empty() {
-                continue;
-            }
-            if let Some(dep) = line.split(':').next() {
-                required.insert(dep.trim().to_string());
+            if line.ends_with(':') && !line.starts_with('#') {
+                let dep = line.trim_end_matches(':').trim();
+                let package_name = dep.split('@').next().unwrap_or(dep).to_string();
+                required.insert(package_name);
             }
         }
     }
 
     // Read pnpm-lock.yaml
     if let Ok(content) = fs::read_to_string("pnpm-lock.yaml") {
-        for line in content.lines() {
-            if line.starts_with('#') || line.trim().is_empty() {
-                continue;
-            }
-            if let Some(dep) = line.split(':').next() {
-                required.insert(dep.trim().to_string());
-            }
-        }
-    }
-
-    // Read bun.lockb
-    if let Ok(content) = fs::read_to_string("bun.lockb") {
-        for line in content.lines() {
-            if line.starts_with('#') || line.trim().is_empty() {
-                continue;
-            }
-            if let Some(dep) = line.split(':').next() {
-                required.insert(dep.trim().to_string());
+        if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            if let Some(packages) = yaml.get("packages").and_then(|v| v.as_mapping()) {
+                for key in packages.keys() {
+                    if let Some(key_str) = key.as_str() {
+                        let package_name = key_str
+                            .split('/')
+                            .nth(1) // Skip the leading "/"
+                            .unwrap_or(key_str)
+                            .split('@')
+                            .next() // Take the name before the version
+                            .unwrap_or(key_str)
+                            .to_string();
+                        required.insert(package_name);
+                    }
+                }
             }
         }
     }
 
     // Read bun.lock
     if let Ok(content) = fs::read_to_string("bun.lock") {
-        for line in content.lines() {
-            if line.starts_with('#') || line.trim().is_empty() {
-                continue;
-            }
-            if let Some(dep) = line.split(':').next() {
-                required.insert(dep.trim().to_string());
+        if let Ok(lock) = serde_json::from_str::<Value>(&content) {
+            if let Some(packages) = lock.get("packages").and_then(|v| v.as_object()) {
+                for dep in packages.keys() {
+                    required.insert(dep.clone());
+                }
             }
         }
     }
