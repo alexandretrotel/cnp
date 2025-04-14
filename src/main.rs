@@ -1,7 +1,8 @@
 use colored::*;
 use comfy_table::{Cell, Color, Table};
+use dialoguer::{theme::ColorfulTheme, MultiSelect};
 use glob::glob;
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use serde_json::Value;
 use std::{collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
@@ -22,68 +23,49 @@ const IGNORE_FOLDERS: [&str; 10] = [
 ];
 
 fn main() {
-    // dry-run mode
-    let dry_run = std::env::args().any(|arg| arg == "--dry-run");
-    let interactive = std::env::args().any(|arg| arg == "--interactive" || arg == "-i");
+    // Parse command-line arguments
+    let args: Vec<String> = std::env::args().collect();
+    let dry_run = args.contains(&"--dry-run".to_string());
+    let interactive =
+        args.contains(&"--interactive".to_string()) || args.contains(&"-i".to_string());
+    let all = args.contains(&"--all".to_string()) || args.contains(&"-a".to_string());
 
-    // glob patterns
-    let patterns: Vec<String> = EXTENSIONS
-        .iter()
-        .flat_map(|ext| vec![format!("*.{}", ext), format!("**/*.{}", ext)])
-        .collect();
+    // Initialize progress bar
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    pb.set_message("Initializing...");
 
-    // read package.json
+    // Read package.json
     let package_json: Value = match fs::read_to_string(PACKAGE_JSON_PATH) {
-        Ok(content) => serde_json::from_str(&content).expect("Invalid JSON in package.json"),
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| {
+            eprintln!("{}", "Error: Invalid JSON in package.json.".red());
+            std::process::exit(1);
+        }),
         Err(_) => {
-            eprintln!("Error: `package.json` not found.");
-            return;
+            eprintln!("{}", "Error: `package.json` not found.".red());
+            std::process::exit(1);
         }
     };
 
-    // collect dependencies
+    // Collect dependencies
     let dependencies = package_json
         .get("dependencies")
         .and_then(Value::as_object)
-        .map_or_else(|| serde_json::Map::new(), |map| map.clone())
-        .keys()
-        .cloned()
-        .collect::<HashSet<_>>();
+        .map_or_else(HashSet::new, |map| {
+            map.keys().cloned().collect::<HashSet<_>>()
+        });
 
-    // used dependencies
-    let mut used_packages = HashSet::new();
-    let mut ignored_files = Vec::new();
-    let mut explored_files = Vec::new();
-
-    let pb = ProgressBar::new_spinner();
+    // Scan for used dependencies
     pb.set_message("Scanning files...");
-    for pattern in &patterns {
-        for entry in glob(pattern).expect("Failed to read glob pattern") {
-            pb.inc(1);
-            if let Ok(path) = entry {
-                if path.is_dir() || path.is_symlink() {
-                    if should_ignore(&path) {
-                        ignored_files.push(path.display().to_string());
-                        continue;
-                    }
-                }
+    let (used_packages, explored_files, ignored_files) = scan_files(&dependencies, &pb);
 
-                if should_ignore(&path) {
-                    ignored_files.push(path.display().to_string());
-                    continue;
-                }
+    pb.finish_with_message("Scanning complete!".green().to_string());
 
-                if let Ok(content) = fs::read_to_string(&path) {
-                    used_packages.extend(find_dependencies_in_content(&content, &dependencies));
-                }
-
-                explored_files.push(path.display().to_string());
-            }
-        }
-    }
-    pb.finish_with_message("Scanning complete!");
-
-    // identify unused dependencies
+    // Identify unused dependencies
     let required_deps = get_required_dependencies();
     let ignored_deps = read_cnpignore();
     let unused_dependencies: Vec<_> = dependencies
@@ -92,122 +74,196 @@ fn main() {
         .cloned()
         .collect();
 
-    // print unused dependencies
+    // Print report
     print_dependency_report(
         &dependencies,
         &used_packages,
         &unused_dependencies,
         &explored_files,
+        &ignored_files,
     );
 
-    // process unused dependencies
+    // Process unused dependencies
     if !unused_dependencies.is_empty() {
-        if dry_run {
-            println!("{}", "Dry-run mode: No deletion will occur.".yellow());
-        }
-        handle_unused_dependencies(&unused_dependencies, dry_run, interactive);
+        handle_unused_dependencies(&unused_dependencies, dry_run, interactive, all);
+    } else {
+        println!("\n{}", "No unused dependencies to process.".green().bold());
     }
 }
 
+fn scan_files(
+    dependencies: &HashSet<String>,
+    pb: &ProgressBar,
+) -> (HashSet<String>, Vec<String>, Vec<String>) {
+    let patterns: Vec<String> = EXTENSIONS
+        .iter()
+        .flat_map(|ext| vec![format!("*.{}", ext), format!("**/*.{}", ext)])
+        .collect();
+    let mut used_packages = HashSet::new();
+    let mut ignored_files = Vec::new();
+    let mut explored_files = Vec::new();
+
+    for pattern in patterns {
+        for entry in glob(&pattern).expect("Failed to read glob pattern") {
+            pb.inc(1);
+            match entry {
+                Ok(path) if !path.is_dir() && !path.is_symlink() => {
+                    if should_ignore(&path) {
+                        ignored_files.push(path.display().to_string());
+                        continue;
+                    }
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        used_packages.extend(find_dependencies_in_content(&content, dependencies));
+                    }
+                    explored_files.push(path.display().to_string());
+                }
+                Ok(path) => {
+                    if should_ignore(&path) {
+                        ignored_files.push(path.display().to_string());
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+
+    (used_packages, explored_files, ignored_files)
+}
+
 fn reinstall_modules() {
-    println!("{}", "Reinstalling node_modules...".yellow());
+    let pb = ProgressBar::new_spinner();
+    pb.set_message("Reinstalling node_modules...");
 
     let node_modules_path = Path::new("node_modules");
     if node_modules_path.exists() {
         if let Err(e) = fs::remove_dir_all(node_modules_path) {
-            eprintln!("Failed to remove node_modules: {}", e);
+            pb.abandon_with_message(
+                format!("Failed to remove node_modules: {}", e)
+                    .red()
+                    .to_string(),
+            );
             return;
         }
     }
 
     let package_manager = detect_package_manager();
-    let result = Command::new(package_manager).arg("install").output();
+    let result = Command::new(&package_manager).arg("install").output();
 
     match result {
         Ok(output) if output.status.success() => {
-            println!("{}", "Reinstallation successful!".green());
+            pb.finish_with_message("Reinstallation successful!".green().to_string());
         }
         _ => {
-            eprintln!("{}", "Failed to reinstall dependencies".red());
+            pb.abandon_with_message("Failed to reinstall dependencies".red().to_string());
         }
     }
 }
 
-fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool, interactive: bool) {
+fn handle_unused_dependencies(
+    unused_dependencies: &[String],
+    dry_run: bool,
+    interactive: bool,
+    all: bool,
+) {
     if dry_run {
-        println!("{}", "\nDry-run mode: Would delete:".yellow());
+        println!(
+            "\n{}",
+            "Dry-run mode: No changes will be made.".yellow().bold()
+        );
+        println!("{}", "Would delete:".yellow());
         for dep in unused_dependencies {
             println!("- {}", dep.yellow());
         }
         return;
     }
 
-    if unused_dependencies.is_empty() {
-        println!("{}", "No unused dependencies to process.".green());
+    let package_manager = detect_package_manager();
+    let to_delete = if interactive {
+        select_dependencies_interactively(unused_dependencies)
+    } else if all {
+        confirm_all_deletion(unused_dependencies)
+    } else {
+        println!(
+            "\nUse {} or {} to delete unused dependencies.",
+            "--interactive (-i)".cyan(),
+            "--all (-a)".cyan()
+        );
+        return;
+    };
+
+    if to_delete.is_empty() {
+        println!(
+            "\n{}",
+            "No dependencies selected for deletion.".yellow().bold()
+        );
         return;
     }
 
-    let package_manager = detect_package_manager();
+    let pb = ProgressBar::new(to_delete.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap(),
+    );
+    pb.set_message("Deleting dependencies...");
 
-    let mut to_delete = Vec::new();
-    if interactive {
-        println!(
-            "\n{}",
-            "Interactive Mode: Processing dependencies one by one"
-                .yellow()
-                .bold()
-        );
-        for dep in unused_dependencies {
-            println!("\nDependency: {}", dep.cyan());
-            println!("Delete {}? (y/n)", dep.red());
-            let mut input = String::new();
-            io::stdin()
-                .read_line(&mut input)
-                .expect("Failed to read input");
-            if input.trim().to_lowercase() == "y" {
-                if uninstall_dependency(dep, &package_manager) {
-                    println!("{} {}", "Deleted:".green(), dep.green());
-                    to_delete.push(dep.clone());
-                } else {
-                    println!("{} {}", "Failed to delete:".red(), dep.red());
-                }
-            } else {
-                println!("{} {}", "Skipped:".yellow(), dep.yellow());
-            }
+    let mut deleted = Vec::new();
+    for dep in &to_delete {
+        pb.inc(1);
+        if uninstall_dependency(dep, &package_manager) {
+            pb.set_message(format!("Deleted: {}", dep).green().to_string());
+            deleted.push(dep.clone());
+        } else {
+            pb.set_message(format!("Failed to delete: {}", dep).red().to_string());
         }
-    } else {
-        println!(
-            "\n{}",
-            "Batch Mode: Review Unused Dependencies".yellow().bold()
-        );
-        for dep in unused_dependencies {
-            println!("Delete {}? (y/n)", dep.red());
-            let mut input = String::new();
-            io::stdin()
-                .read_line(&mut input)
-                .expect("Failed to read input");
-            if input.trim().to_lowercase() == "y" {
-                to_delete.push(dep.clone());
-            }
-        }
-
-        if to_delete.is_empty() {
-            println!("{}", "No dependencies selected for deletion.".green());
-            return;
-        }
-
-        println!("{}", "Deleting selected dependencies...".red().bold());
-        for dep in &to_delete {
-            if uninstall_dependency(dep, &package_manager) {
-                println!("{} {}", "Deleted:".green(), dep.green());
-            } else {
-                println!("{} {}", "Failed to delete:".red(), dep.red());
-            }
-        }
+        pb.tick();
     }
+    pb.finish_with_message("Deletion complete!".green().to_string());
 
-    if !to_delete.is_empty() {
+    if !deleted.is_empty() {
         reinstall_modules();
+    }
+}
+
+fn select_dependencies_interactively(unused_dependencies: &[String]) -> Vec<String> {
+    println!("\n{}", "Select dependencies to delete:".cyan().bold());
+    let defaults = vec![true; unused_dependencies.len()];
+    let selection = MultiSelect::with_theme(&ColorfulTheme::default())
+        .items(unused_dependencies)
+        .defaults(&defaults)
+        .with_prompt("Use arrow keys and space to select, Enter to confirm")
+        .interact_opt()
+        .unwrap_or(None);
+
+    match selection {
+        Some(indices) => indices
+            .into_iter()
+            .map(|i| unused_dependencies[i].clone())
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+fn confirm_all_deletion(unused_dependencies: &[String]) -> Vec<String> {
+    println!(
+        "\n{}",
+        "The following dependencies will be deleted:".red().bold()
+    );
+    for dep in unused_dependencies {
+        println!("- {}", dep.red());
+    }
+    println!(
+        "\n{}",
+        "Confirm deletion of all unused dependencies? (y/n)".yellow()
+    );
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read input");
+    if input.trim().to_lowercase() == "y" {
+        unused_dependencies.to_vec()
+    } else {
+        Vec::new()
     }
 }
 
@@ -216,9 +272,7 @@ fn detect_package_manager() -> String {
         "pnpm".to_string()
     } else if Path::new("yarn.lock").exists() {
         "yarn".to_string()
-    } else if Path::new("bun.lockb").exists() {
-        "bun".to_string()
-    } else if Path::new("bun.lock").exists() {
+    } else if Path::new("bun.lockb").exists() || Path::new("bun.lock").exists() {
         "bun".to_string()
     } else {
         "npm".to_string()
@@ -228,10 +282,17 @@ fn detect_package_manager() -> String {
 fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
     let mut found = HashSet::new();
     for dep in dependencies {
-        let regex = Regex::new(&format!(r#"[\"']{}[\"']"#, regex::escape(dep))).unwrap();
-        let require_regex =
-            Regex::new(&format!(r#"require\([\"']{}[\"']\)"#, regex::escape(dep))).unwrap();
-        if regex.is_match(content) || require_regex.is_match(content) {
+        let import_regex = Regex::new(&format!(
+            r#"import\s+.*?\s+from\s+[\'"]{}[\'"]"#,
+            regex::escape(dep)
+        ))
+        .unwrap();
+        let require_regex = Regex::new(&format!(
+            r#"require\s*\(\s*[\'"]{}[\'"]\s*\)"#,
+            regex::escape(dep)
+        ))
+        .unwrap();
+        if import_regex.is_match(content) || require_regex.is_match(content) {
             found.insert(dep.clone());
         }
     }
@@ -240,48 +301,45 @@ fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -
 
 fn uninstall_dependency(dependency: &str, package_manager: &str) -> bool {
     let output = Command::new(package_manager)
-        .args(&["uninstall", dependency])
+        .args(["uninstall", dependency])
         .output();
 
-    match output {
-        Ok(result) if result.status.success() => true,
-        _ => false,
-    }
+    matches!(output, Ok(result) if result.status.success())
 }
 
 fn should_ignore(path: &Path) -> bool {
-    IGNORE_FOLDERS.iter().any(|folder| {
-        path.components()
-            .any(|component| component.as_os_str() == OsStr::new(folder))
+    path.components().any(|component| {
+        IGNORE_FOLDERS
+            .iter()
+            .any(|folder| component.as_os_str() == OsStr::new(folder))
     })
 }
 
 fn get_required_dependencies() -> HashSet<String> {
     let mut required = HashSet::new();
 
-    // Read package-lock.json
+    // Package-lock.json
     if let Ok(content) = fs::read_to_string("package-lock.json") {
         if let Ok(lock) = serde_json::from_str::<Value>(&content) {
-            if let Some(deps) = lock.get("dependencies").and_then(|v| v.as_object()) {
-                for dep in deps.keys() {
-                    required.insert(dep.clone());
+            if let Some(deps) = lock.get("dependencies").and_then(Value::as_object) {
+                required.extend(deps.keys().cloned());
+            }
+        }
+    }
+
+    // Yarn.lock
+    if let Ok(content) = fs::read_to_string("yarn.lock") {
+        for line in content.lines() {
+            if line.ends_with(':') && !line.starts_with('#') {
+                let dep = line.trim_end_matches(':').trim();
+                if let Some(package_name) = dep.split('@').next() {
+                    required.insert(package_name.to_string());
                 }
             }
         }
     }
 
-    // Read yarn.lock
-    if let Ok(content) = fs::read_to_string("yarn.lock") {
-        for line in content.lines() {
-            if line.ends_with(':') && !line.starts_with('#') {
-                let dep = line.trim_end_matches(':').trim();
-                let package_name = dep.split('@').next().unwrap_or(dep).to_string();
-                required.insert(package_name);
-            }
-        }
-    }
-
-    // Read pnpm-lock.yaml
+    // Pnpm-lock.yaml
     if let Ok(content) = fs::read_to_string("pnpm-lock.yaml") {
         if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
             if let Some(packages) = yaml.get("packages").and_then(|v| v.as_mapping()) {
@@ -289,10 +347,10 @@ fn get_required_dependencies() -> HashSet<String> {
                     if let Some(key_str) = key.as_str() {
                         let package_name = key_str
                             .split('/')
-                            .nth(1) // Skip the leading "/"
+                            .nth(1)
                             .unwrap_or(key_str)
                             .split('@')
-                            .next() // Take the name before the version
+                            .next()
                             .unwrap_or(key_str)
                             .to_string();
                         required.insert(package_name);
@@ -302,13 +360,11 @@ fn get_required_dependencies() -> HashSet<String> {
         }
     }
 
-    // Read bun.lock
+    // Bun.lock
     if let Ok(content) = fs::read_to_string("bun.lock") {
         if let Ok(lock) = serde_json::from_str::<Value>(&content) {
-            if let Some(packages) = lock.get("packages").and_then(|v| v.as_object()) {
-                for dep in packages.keys() {
-                    required.insert(dep.clone());
-                }
+            if let Some(packages) = lock.get("packages").and_then(Value::as_object) {
+                required.extend(packages.keys().cloned());
             }
         }
     }
@@ -318,7 +374,6 @@ fn get_required_dependencies() -> HashSet<String> {
 
 fn read_cnpignore() -> HashSet<String> {
     fs::read_to_string(".cnpignore")
-        .ok()
         .map(|content| {
             content
                 .lines()
@@ -335,6 +390,7 @@ fn print_dependency_report(
     used_packages: &HashSet<String>,
     unused_dependencies: &[String],
     explored_files: &[String],
+    ignored_files: &[String],
 ) {
     let mut table = Table::new();
     table.set_header(vec!["Metric", "Value"]);
@@ -350,6 +406,10 @@ fn print_dependency_report(
     table.add_row(vec![
         Cell::new("Explored Files"),
         Cell::new(explored_files.len().to_string()),
+    ]);
+    table.add_row(vec![
+        Cell::new("Ignored Files"),
+        Cell::new(ignored_files.len().to_string()),
     ]);
     table.add_row(vec![
         Cell::new("Total Dependencies"),
@@ -368,7 +428,9 @@ fn print_dependency_report(
 
     if !used_packages.is_empty() {
         println!("\n{}", "Used Dependencies:".green().bold());
-        for dep in used_packages {
+        let mut used = used_packages.iter().collect::<Vec<_>>();
+        used.sort();
+        for dep in used {
             println!("- {}", dep.green());
         }
     }
@@ -379,7 +441,9 @@ fn print_dependency_report(
             "{}",
             "Note: Some may be required at runtime (e.g., react-dom).".yellow()
         );
-        for dep in unused_dependencies {
+        let mut unused = unused_dependencies.to_vec();
+        unused.sort();
+        for dep in unused {
             println!("- {}", dep.red());
         }
     } else {
