@@ -275,16 +275,30 @@ fn detect_package_manager() -> String {
 fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
     let mut found = HashSet::new();
     for dep in dependencies {
+        // For scoped packages, extract the root package name (e.g., @vercel/analytics)
+        let dep_pattern = if dep.starts_with('@') {
+            let parts: Vec<&str> = dep.split('/').collect();
+            if parts.len() > 1 {
+                format!("{}/{}", parts[0], parts[1])
+            } else {
+                dep.clone()
+            }
+        } else {
+            dep.clone()
+        };
+
+        // Create regex patterns for both the root package and potential submodules
         let import_regex = Regex::new(&format!(
-            r#"import\s+.*?\s+from\s+[\'"]{}[\'"]"#,
-            regex::escape(dep)
+            r#"import\s+.*?\s+from\s+['"]({}(/[^'"]*)?)['"]"#,
+            regex::escape(&dep_pattern)
         ))
         .unwrap();
         let require_regex = Regex::new(&format!(
-            r#"require\s*\(\s*[\'"]{}[\'"]\s*\)"#,
-            regex::escape(dep)
+            r#"require\s*\(\s*['"]({}(/[^'"]*)?)['"]\s*\)"#,
+            regex::escape(&dep_pattern)
         ))
         .unwrap();
+
         if import_regex.is_match(content) || require_regex.is_match(content) {
             found.insert(dep.clone());
         }
