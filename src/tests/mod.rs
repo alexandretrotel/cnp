@@ -3,6 +3,7 @@ mod tests {
     use crate::dependency::{get_required_dependencies, read_cnpignore, read_package_json};
     use crate::file_scanner::scan_files;
     use crate::package_manager::detect_package_manager;
+    use crate::uninstall::handle_unused_dependencies;
     use indicatif::ProgressBar;
     use std::collections::HashSet;
     use std::env;
@@ -343,5 +344,177 @@ mod tests {
                 map.keys().cloned().collect::<HashSet<String>>()
             });
         assert_eq!(dependencies, HashSet::new());
+    }
+
+    #[test]
+    fn test_file_scanner_empty_files() {
+        let temp_dir = setup_temp_dir();
+        // Create an empty JavaScript file
+        let js_file_path = temp_dir.path().join("index.js");
+        File::create(&js_file_path).unwrap();
+
+        let dependencies: HashSet<String> = ["react", "@vercel/analytics", "lodash"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let pb = ProgressBar::new(1);
+        let (used_packages, explored_files, ignored_files) = scan_files(&dependencies, &pb);
+
+        // Expect no used dependencies, one explored file, and no ignored files
+        assert_eq!(
+            used_packages,
+            HashSet::new(),
+            "No dependencies should be found in empty file"
+        );
+        assert_eq!(
+            explored_files,
+            vec![js_file_path.display().to_string()],
+            "Should explore index.js"
+        );
+        assert_eq!(
+            ignored_files,
+            Vec::<String>::new(),
+            "No files should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_file_scanner_non_js_extensions() {
+        let temp_dir = setup_temp_dir();
+        // Create a TypeScript file with imports
+        let ts_file_path = temp_dir.path().join("index.ts");
+        let content = r#"
+        import React from 'react';
+        import { analytics } from '@vercel/analytics';
+    "#;
+        File::create(&ts_file_path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+
+        let dependencies: HashSet<String> = ["react", "@vercel/analytics", "lodash"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let pb = ProgressBar::new(1);
+        let (used_packages, explored_files, ignored_files) = scan_files(&dependencies, &pb);
+
+        // Expect react and @vercel/analytics as used
+        let expected_used: HashSet<String> = ["react", "@vercel/analytics"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            used_packages, expected_used,
+            "Should detect dependencies in .ts file"
+        );
+        assert_eq!(
+            explored_files,
+            vec![ts_file_path.display().to_string()],
+            "Should explore index.ts"
+        );
+        assert_eq!(
+            ignored_files,
+            Vec::<String>::new(),
+            "No files should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_uninstall_dry_run() {
+        let temp_dir = setup_temp_dir();
+        setup_package_json(&temp_dir).unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let unused_dependencies = vec!["lodash".to_string(), "@vercel/analytics".to_string()];
+        let dry_run = true;
+        let interactive = false;
+        let all = false;
+
+        // Run handle_unused_dependencies in dry-run mode
+        handle_unused_dependencies(&unused_dependencies, dry_run, interactive, all);
+
+        // Verify package.json is unchanged
+        let package_json = read_package_json("package.json").unwrap();
+        let dependencies = package_json
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
+        let expected: HashSet<String> = ["react", "@vercel/analytics", "lodash"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            dependencies, expected,
+            "Dependencies should not be modified in dry-run"
+        );
+    }
+
+    #[test]
+    fn test_dependency_alias_imports() {
+        let temp_dir = setup_temp_dir();
+        let js_file_path = temp_dir.path().join("index.js");
+        let content = r#"
+        import { useState as useReactState } from 'react';
+        import { analytics as vercelAnalytics } from '@vercel/analytics';
+    "#;
+        File::create(&js_file_path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+
+        let dependencies: HashSet<String> = ["react", "@vercel/analytics", "lodash"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let pb = ProgressBar::new(1);
+        let (used_packages, explored_files, ignored_files) = scan_files(&dependencies, &pb);
+
+        // Expect react and @vercel/analytics despite aliases
+        let expected_used: HashSet<String> = ["react", "@vercel/analytics"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            used_packages, expected_used,
+            "Should detect aliased imports"
+        );
+        assert_eq!(
+            explored_files,
+            vec![js_file_path.display().to_string()],
+            "Should explore index.js"
+        );
+        assert_eq!(
+            ignored_files,
+            Vec::<String>::new(),
+            "No files should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_malformed_yaml_lockfile() {
+        let temp_dir = setup_temp_dir();
+        let lockfile_path = temp_dir.path().join("pnpm-lock.yaml");
+        // Write invalid YAML
+        let content = r#"invalid: yaml: structure"#;
+        File::create(&lockfile_path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let required = get_required_dependencies();
+        let expected: HashSet<String> = HashSet::new();
+        assert_eq!(
+            required, expected,
+            "Should return empty set for malformed pnpm-lock.yaml"
+        );
     }
 }

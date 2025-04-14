@@ -1,6 +1,6 @@
 [package]
 name = "cnp"
-version = "0.5.7"
+version = "1.0.0"
 authors = ["Alexandre Trotel <trotelalexandre@proton.me>"]
 edition = "2021"
 description = "A utility tool written in Rust to check unused node packages."
