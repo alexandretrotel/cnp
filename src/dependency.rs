@@ -32,6 +32,19 @@ pub fn get_required_dependencies() -> HashSet<String> {
         return HashSet::new();
     }
 
+    // Process package.json first to ensure top-level dependencies are included
+    if let Ok(package_json) = read_package_json("package.json") {
+        if let Some(deps) = package_json.get("dependencies").and_then(Value::as_object) {
+            required.extend(deps.keys().cloned());
+        }
+        if let Some(dev_deps) = package_json
+            .get("devDependencies")
+            .and_then(Value::as_object)
+        {
+            required.extend(dev_deps.keys().cloned());
+        }
+    }
+
     // Process single lockfile
     if let Some(lockfile) = existing_lockfiles.first() {
         match *lockfile {
@@ -39,26 +52,20 @@ pub fn get_required_dependencies() -> HashSet<String> {
             "package-lock.json" => {
                 if let Ok(content) = fs::read_to_string("package-lock.json") {
                     if let Ok(lock) = serde_json::from_str::<Value>(&content) {
-                        if let Some(deps) = lock.get("dependencies").and_then(Value::as_object) {
-                            required.extend(deps.keys().filter(|k| !k.is_empty()).cloned());
-                        }
                         if let Some(packages) = lock.get("packages").and_then(Value::as_object) {
                             for key in packages.keys() {
-                                if let Some(package_name) = key.strip_prefix("/").and_then(|k| {
-                                    if k.starts_with('@') {
-                                        k.splitn(2, '@').next()
-                                    } else {
-                                        k.split('@').next()
-                                    }
-                                }) {
-                                    if !package_name.is_empty() {
-                                        required.insert(package_name.to_string());
-                                    }
+                                let package_name = key
+                                    .strip_prefix("node_modules/")
+                                    .unwrap_or(key)
+                                    .split('@')
+                                    .next()
+                                    .unwrap_or("")
+                                    .to_string();
+                                if !package_name.is_empty() {
+                                    required.insert(package_name);
                                 }
                             }
                         }
-                    } else {
-                        return HashSet::new();
                     }
                 }
             }
@@ -69,11 +76,15 @@ pub fn get_required_dependencies() -> HashSet<String> {
                         if line.ends_with(':') && !line.starts_with('#') && !line.trim().is_empty()
                         {
                             let dep = line.trim_end_matches(':').trim();
-                            let package_name = if dep.contains('@') && dep.starts_with('@') {
-                                dep.rsplitn(2, '@').last().unwrap_or(dep).to_string()
-                            } else {
-                                dep.split('@').next().unwrap_or(dep).to_string()
-                            };
+                            let package_name = dep
+                                .split(',')
+                                .next()
+                                .unwrap_or(dep)
+                                .trim()
+                                .split('@')
+                                .next()
+                                .unwrap_or("")
+                                .to_string();
                             if !package_name.is_empty() {
                                 required.insert(package_name);
                             }
@@ -85,19 +96,14 @@ pub fn get_required_dependencies() -> HashSet<String> {
             "pnpm-lock.yaml" => {
                 if let Ok(content) = fs::read_to_string("pnpm-lock.yaml") {
                     if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                        if let Some(packages) = yaml.get("packages").and_then(|v| v.as_mapping()) {
-                            for key in packages.keys() {
+                        if let Some(deps) = yaml
+                            .get("dependencies")
+                            .or_else(|| yaml.get("devDependencies"))
+                            .and_then(|v| v.as_mapping())
+                        {
+                            for key in deps.keys() {
                                 if let Some(key_str) = key.as_str() {
-                                    let package_name = key_str
-                                        .strip_prefix('/')
-                                        .unwrap_or(key_str)
-                                        .split('@')
-                                        .next()
-                                        .unwrap_or("")
-                                        .to_string();
-                                    if !package_name.is_empty() {
-                                        required.insert(package_name);
-                                    }
+                                    required.insert(key_str.to_string());
                                 }
                             }
                         }
@@ -108,17 +114,20 @@ pub fn get_required_dependencies() -> HashSet<String> {
             "bun.lock" => {
                 if let Ok(content) = fs::read_to_string(lockfile) {
                     if let Ok(lock) = serde_json::from_str::<Value>(&content) {
-                        if let Some(packages) = lock.get("packages").and_then(Value::as_object) {
-                            for key in packages.keys() {
-                                let package_name = if key.starts_with('@') {
-                                    // Handle scoped packages (e.g., @vercel/analytics)
-                                    key.splitn(2, '@').collect::<Vec<&str>>()[0].to_string()
-                                } else {
-                                    key.split('@').next().unwrap_or(key).to_string()
-                                };
-                                if !package_name.is_empty() {
-                                    required.insert(package_name);
-                                }
+                        if let Some(workspaces) = lock
+                            .get("workspaces")
+                            .and_then(|v| v.get(""))
+                            .and_then(Value::as_object)
+                        {
+                            if let Some(deps) =
+                                workspaces.get("dependencies").and_then(Value::as_object)
+                            {
+                                required.extend(deps.keys().cloned());
+                            }
+                            if let Some(dev_deps) =
+                                workspaces.get("devDependencies").and_then(Value::as_object)
+                            {
+                                required.extend(dev_deps.keys().cloned());
                             }
                         }
                     }
@@ -136,9 +145,17 @@ pub fn read_cnpignore() -> HashSet<String> {
         .map(|content| {
             content
                 .lines()
-                .map(|line| line.trim())
+                .map(|line| {
+                    let trimmed = line.trim();
+                    // Strip inline comments
+                    trimmed
+                        .split('#')
+                        .next()
+                        .unwrap_or(trimmed)
+                        .trim()
+                        .to_string()
+                })
                 .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(String::from)
                 .collect()
         })
         .unwrap_or_default()
