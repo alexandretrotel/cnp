@@ -24,6 +24,7 @@ const IGNORE_FOLDERS: [&str; 10] = [
 fn main() {
     // dry-run mode
     let dry_run = std::env::args().any(|arg| arg == "--dry-run");
+    let interactive = std::env::args().any(|arg| arg == "--interactive" || arg == "-i");
 
     // glob patterns
     let patterns: Vec<String> = EXTENSIONS
@@ -99,21 +100,12 @@ fn main() {
         &explored_files,
     );
 
-    // confirm deletion
+    // process unused dependencies
     if !unused_dependencies.is_empty() {
         if dry_run {
             println!("{}", "Dry-run mode: No deletion will occur.".yellow());
-        } else {
-            if !ask_for_confirmation() {
-                println!("{}", "Operation cancelled.".red());
-                return;
-            }
         }
-    }
-
-    // prune unused dependencies
-    if !unused_dependencies.is_empty() {
-        handle_unused_dependencies(&unused_dependencies, dry_run);
+        handle_unused_dependencies(&unused_dependencies, dry_run, interactive);
     }
 }
 
@@ -126,7 +118,6 @@ fn reinstall_modules() {
             eprintln!("Failed to remove node_modules: {}", e);
             return;
         }
-        println!("{}", "Deleted node_modules".green());
     }
 
     let package_manager = detect_package_manager();
@@ -142,7 +133,7 @@ fn reinstall_modules() {
     }
 }
 
-fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool) {
+fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool, interactive: bool) {
     if dry_run {
         println!("{}", "\nDry-run mode: Would delete:".yellow());
         for dep in unused_dependencies {
@@ -152,37 +143,72 @@ fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool) {
     }
 
     if unused_dependencies.is_empty() {
+        println!("{}", "No unused dependencies to process.".green());
         return;
     }
 
-    println!("\n{}", "Review Unused Dependencies:".yellow().bold());
+    let package_manager = detect_package_manager();
+
     let mut to_delete = Vec::new();
-    for dep in unused_dependencies {
-        println!("Delete {}? (y/n)", dep.red());
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read input");
-        if input.trim().to_lowercase() == "y" {
-            to_delete.push(dep.clone());
+    if interactive {
+        println!(
+            "\n{}",
+            "Interactive Mode: Processing dependencies one by one"
+                .yellow()
+                .bold()
+        );
+        for dep in unused_dependencies {
+            println!("\nDependency: {}", dep.cyan());
+            println!("Delete {}? (y/n)", dep.red());
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .expect("Failed to read input");
+            if input.trim().to_lowercase() == "y" {
+                if uninstall_dependency(dep, &package_manager) {
+                    println!("{} {}", "Deleted:".green(), dep.green());
+                    to_delete.push(dep.clone());
+                } else {
+                    println!("{} {}", "Failed to delete:".red(), dep.red());
+                }
+            } else {
+                println!("{} {}", "Skipped:".yellow(), dep.yellow());
+            }
+        }
+    } else {
+        println!(
+            "\n{}",
+            "Batch Mode: Review Unused Dependencies".yellow().bold()
+        );
+        for dep in unused_dependencies {
+            println!("Delete {}? (y/n)", dep.red());
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .expect("Failed to read input");
+            if input.trim().to_lowercase() == "y" {
+                to_delete.push(dep.clone());
+            }
+        }
+
+        if to_delete.is_empty() {
+            println!("{}", "No dependencies selected for deletion.".green());
+            return;
+        }
+
+        println!("{}", "Deleting selected dependencies...".red().bold());
+        for dep in &to_delete {
+            if uninstall_dependency(dep, &package_manager) {
+                println!("{} {}", "Deleted:".green(), dep.green());
+            } else {
+                println!("{} {}", "Failed to delete:".red(), dep.red());
+            }
         }
     }
 
-    if to_delete.is_empty() {
-        println!("{}", "No dependencies selected for deletion.".green());
-        return;
+    if !to_delete.is_empty() {
+        reinstall_modules();
     }
-
-    println!("{}", "Deleting selected dependencies...".red().bold());
-    for dep in &to_delete {
-        if uninstall_dependency(dep, &detect_package_manager()) {
-            println!("{} {}", "Deleted:".green(), dep.green());
-        } else {
-            println!("{} {}", "Failed to delete:".red(), dep.red());
-        }
-    }
-
-    reinstall_modules();
 }
 
 fn detect_package_manager() -> String {
@@ -197,20 +223,6 @@ fn detect_package_manager() -> String {
     } else {
         "npm".to_string()
     }
-}
-
-fn ask_for_confirmation() -> bool {
-    println!(
-        "{}",
-        "Are you sure you want to delete the unused dependencies? (yes/no)"
-            .yellow()
-            .bold()
-    );
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read input");
-    input.trim().to_lowercase() == "yes"
 }
 
 fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
