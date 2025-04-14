@@ -67,7 +67,5 @@ fn main() {
     // Process unused dependencies
     if !unused_dependencies.is_empty() {
         handle_unused_dependencies(&unused_dependencies, dry_run, interactive, all);
-    } else {
-        println!("\n{}", "No unused dependencies to process.".green().bold());
     }
 }
