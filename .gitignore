@@ -1,5 +1,5 @@
 # Output directories
-/target
+target/
 
 # Environment files
 .env
