@@ -109,7 +109,17 @@ pub fn get_required_dependencies() -> HashSet<String> {
                 if let Ok(content) = fs::read_to_string(lockfile) {
                     if let Ok(lock) = serde_json::from_str::<Value>(&content) {
                         if let Some(packages) = lock.get("packages").and_then(Value::as_object) {
-                            required.extend(packages.keys().filter(|k| !k.is_empty()).cloned());
+                            for key in packages.keys() {
+                                let package_name = if key.starts_with('@') {
+                                    // Handle scoped packages (e.g., @vercel/analytics)
+                                    key.splitn(2, '@').collect::<Vec<&str>>()[0].to_string()
+                                } else {
+                                    key.split('@').next().unwrap_or(key).to_string()
+                                };
+                                if !package_name.is_empty() {
+                                    required.insert(package_name);
+                                }
+                            }
                         }
                     }
                 }
