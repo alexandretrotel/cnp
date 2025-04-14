@@ -6,6 +6,9 @@ mod report;
 mod uninstall;
 mod utils;
 
+#[cfg(test)]
+mod tests;
+
 use colored::*;
 use config::PACKAGE_JSON_PATH;
 use dependency::read_package_json;
