@@ -5,20 +5,31 @@ mod tests {
     use crate::package_manager::detect_package_manager;
     use indicatif::ProgressBar;
     use std::collections::HashSet;
+    use std::env;
     use std::fs::{self, File};
-    use std::io::Write;
-    use std::path::Path;
+    use std::io::{self, Write};
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn setup_temp_dir() -> TempDir {
         TempDir::new().expect("Failed to create temp dir")
     }
 
-    fn setup_lockfile(temp_dir: &TempDir, lockfile_name: &str) -> std::io::Result<()> {
-        let source_path = Path::new("test_fixtures").join(lockfile_name);
+    fn setup_lockfile(temp_dir: &TempDir, lockfile_name: &str) -> io::Result<()> {
+        let project_root = env::var("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let test_fixtures_dir = project_root.join("test_fixtures");
+        if !test_fixtures_dir.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "test_fixtures directory not found",
+            ));
+        }
+        let source_path = test_fixtures_dir.join(lockfile_name);
         if !source_path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
                 format!("Lock file {} not found in test_fixtures", lockfile_name),
             ));
         }
