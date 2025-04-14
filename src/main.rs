@@ -192,6 +192,8 @@ fn detect_package_manager() -> String {
         "yarn".to_string()
     } else if Path::new("bun.lockb").exists() {
         "bun".to_string()
+    } else if Path::new("bun.lock").exists() {
+        "bun".to_string()
     } else {
         "npm".to_string()
     }
