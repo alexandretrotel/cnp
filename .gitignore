@@ -1,1 +1,12 @@
+# Output directories
 /target
+
+# Environment files
+.env
+.env.*
+
+# FeedYourAI
+feedyourai.txt
+
+# DS_Store
+.DS_Store
