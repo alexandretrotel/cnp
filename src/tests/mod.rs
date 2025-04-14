@@ -143,7 +143,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_multiple_lockfiles() {
         let temp_dir = setup_temp_dir();
 

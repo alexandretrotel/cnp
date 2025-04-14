@@ -58,6 +58,8 @@ pub fn get_required_dependencies() -> HashSet<String> {
                                 }
                             }
                         }
+                    } else {
+                        return HashSet::new();
                     }
                 }
             }
