@@ -1,8 +1,6 @@
 # 🛠️ **Check Node Packages (cnp)**
 
 A utility tool written in **Rust** to check for unused node packages in your project. It helps you identify and clean up dependencies that are no longer needed.
-This project is **Work in Progress (WIP)** 🚧, so feel free to contribute!
-Please note, that the current version (0.2.0) is not stable and don't work as expected yet.
 
 ## ✨ Features
 

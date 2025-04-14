@@ -243,6 +243,7 @@ fn should_ignore(path: &Path) -> bool {
 }
 
 fn get_required_dependencies() -> HashSet<String> {
+    // Read package-lock.json
     let mut required = HashSet::new();
     if let Ok(content) = fs::read_to_string("package-lock.json") {
         if let Ok(lock) = serde_json::from_str::<Value>(&content) {
@@ -256,7 +257,55 @@ fn get_required_dependencies() -> HashSet<String> {
             }
         }
     }
-    // TODO: Add support for yarn.lock, pnpm-lock.yaml and bun.lock
+
+    // Read yarn.lock
+    if let Ok(content) = fs::read_to_string("yarn.lock") {
+        for line in content.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some(dep) = line.split(':').next() {
+                required.insert(dep.trim().to_string());
+            }
+        }
+    }
+
+    // Read pnpm-lock.yaml
+    if let Ok(content) = fs::read_to_string("pnpm-lock.yaml") {
+        for line in content.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some(dep) = line.split(':').next() {
+                required.insert(dep.trim().to_string());
+            }
+        }
+    }
+
+    // Read bun.lockb
+    if let Ok(content) = fs::read_to_string("bun.lockb") {
+        for line in content.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some(dep) = line.split(':').next() {
+                required.insert(dep.trim().to_string());
+            }
+        }
+    }
+
+    // Read bun.lock
+    if let Ok(content) = fs::read_to_string("bun.lock") {
+        for line in content.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some(dep) = line.split(':').next() {
+                required.insert(dep.trim().to_string());
+            }
+        }
+    }
+
     required
 }
 
