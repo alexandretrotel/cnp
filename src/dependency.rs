@@ -16,7 +16,6 @@ pub fn get_required_dependencies() -> HashSet<String> {
         ("yarn.lock", Path::new("yarn.lock").exists()),
         ("pnpm-lock.yaml", Path::new("pnpm-lock.yaml").exists()),
         ("bun.lock", Path::new("bun.lock").exists()),
-        ("bun.lockb", Path::new("bun.lockb").exists()),
     ];
 
     let existing_lockfiles: Vec<&str> = lockfiles
@@ -105,8 +104,8 @@ pub fn get_required_dependencies() -> HashSet<String> {
                     }
                 }
             }
-            // bun.lock or bun.lockb
-            "bun.lock" | "bun.lockb" => {
+            // bun.lock
+            "bun.lock" => {
                 if let Ok(content) = fs::read_to_string(lockfile) {
                     if let Ok(lock) = serde_json::from_str::<Value>(&content) {
                         if let Some(packages) = lock.get("packages").and_then(Value::as_object) {

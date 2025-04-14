@@ -5,7 +5,7 @@ pub fn detect_package_manager() -> String {
         "pnpm".to_string()
     } else if Path::new("yarn.lock").exists() {
         "yarn".to_string()
-    } else if Path::new("bun.lockb").exists() || Path::new("bun.lock").exists() {
+    } else if Path::new("bun.lock").exists() {
         "bun".to_string()
     } else {
         "npm".to_string()
