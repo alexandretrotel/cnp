@@ -247,13 +247,6 @@ fn select_dependencies_interactively(unused_dependencies: &[String]) -> Vec<Stri
 fn confirm_all_deletion(unused_dependencies: &[String]) -> Vec<String> {
     println!(
         "\n{}",
-        "The following dependencies will be deleted:".red().bold()
-    );
-    for dep in unused_dependencies {
-        println!("- {}", dep.red());
-    }
-    println!(
-        "\n{}",
         "Confirm deletion of all unused dependencies? (y/n)".yellow()
     );
     let mut input = String::new();
