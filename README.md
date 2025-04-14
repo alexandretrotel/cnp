@@ -5,38 +5,28 @@ This project is **Work in Progress (WIP)** 🚧, so feel free to contribute!
 Please note, that the current version (0.2.0) is not stable and don't work as expected yet.
 
 ## ✨ Features
-- Check for unused node dependencies in your project.
-- Option to **clean** and remove unused dependencies from your `package.json`.
-- Scan files in your project to check which dependencies are used.
-- Supports `js`, `ts`, `jsx`, and `tsx` file types.
-- Skips directories like `node_modules`, `dist`, `build`, and others by default.
+
+- Scans files for dependency usage.
+- Supports `.cnpignore` for excluding dependencies.
+- Interactive mode for reviewing deletions.
+- Clear, tabular output with progress feedback.
 
 ## 📚 Usage
 
-1. **Clone this repo**:
-    - `git clone https://github.com/trotelalexandre/cnp.git`
-    - `cd cnp`
+```bash
+cnp           # Scan and report unused dependencies
+cnp --dry-run # Preview without changes
+cnp --clean   # Interactively remove unused dependencies
+```
 
-2. **Build the project**:
-    - Make sure you have Rust installed. If not, install it. Then, build the project using:
-      - `cargo build --release`
+## Configuration
 
-3. **Run the tool**:
-    - To check for unused dependencies in your project, run:
-      - `./target/release/cnp`
+- **`.cnpignore`**: List dependencies to exclude (one per line, `#` for comments).
 
-4. **Clean unused dependencies**:
-    - To automatically remove unused dependencies from your `package.json`, run:
-      - `./target/release/cnp --clean`
-
-### Options
-
-- `--clean` – Removes unused dependencies from your `package.json` file.
-
-## 📝 TODO
-
-- [ ] Implement better error handling 💥
-- [ ] Add more file types for scanning 📝
+```text
+react-dom
+eslint
+```
 
 ## 🧑‍💻 Contributing
 

@@ -1,12 +1,13 @@
 use colored::*;
+use comfy_table::{Cell, Color, Table};
 use glob::glob;
+use indicatif::ProgressBar;
 use regex::Regex;
 use serde_json::Value;
-use std::{cmp::min, collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
+use std::{collections::HashSet, ffi::OsStr, fs, io, path::Path, process::Command};
 
 const PACKAGE_JSON_PATH: &str = "package.json";
 const EXTENSIONS: [&str; 5] = ["js", "ts", "jsx", "tsx", "mdx"];
-const MAX_EXPLORED_FILES: usize = 5;
 const IGNORE_FOLDERS: [&str; 10] = [
     "node_modules",
     "dist",
@@ -53,8 +54,11 @@ fn main() {
     let mut ignored_files = Vec::new();
     let mut explored_files = Vec::new();
 
+    let pb = ProgressBar::new_spinner();
+    pb.set_message("Scanning files...");
     for pattern in &patterns {
         for entry in glob(pattern).expect("Failed to read glob pattern") {
+            pb.inc(1);
             if let Ok(path) = entry {
                 if path.is_dir() || path.is_symlink() {
                     if should_ignore(&path) {
@@ -76,55 +80,35 @@ fn main() {
             }
         }
     }
+    pb.finish_with_message("Scanning complete!");
 
     // identify unused dependencies
-    let unused_dependencies: Vec<_> = dependencies.difference(&used_packages).cloned().collect();
+    let required_deps = get_required_dependencies();
+    let ignored_deps = read_cnpignore();
+    let unused_dependencies: Vec<_> = dependencies
+        .difference(&used_packages)
+        .filter(|dep| !required_deps.contains(*dep) && !ignored_deps.contains(*dep))
+        .cloned()
+        .collect();
 
     // print unused dependencies
-    println!("{}", "\nDependency Usage Report".bold().blue());
-    println!("{}", "------------------------".blue());
-    println!("{}: {}", "Project".bold(), PACKAGE_JSON_PATH);
-    println!("{}: {:?}", "Extensions".bold(), EXTENSIONS);
-    println!(
-        "{}: {}",
-        "Ignored Folders".bold(),
-        IGNORE_FOLDERS.join(", ")
-    );
-    println!("{}: {}", "Explored Files".bold(), explored_files.len());
-    println!(
-        "{}: {}",
-        "Some Explored Files".bold(),
-        explored_files[..min(MAX_EXPLORED_FILES, explored_files.len())].join(", ")
-    );
-    println!("{}: {}", "Package Manager".bold(), detect_package_manager());
-    println!("{}: {}", "Total dependencies".bold(), dependencies.len());
-    println!(
-        "{}: {}",
-        "Used dependencies".bold().green(),
-        used_packages.len()
-    );
-    println!(
-        "{}: {}",
-        "Unused dependencies".bold().red(),
-        unused_dependencies.len()
+    print_dependency_report(
+        &dependencies,
+        &used_packages,
+        &unused_dependencies,
+        &explored_files,
     );
 
-    if !used_packages.is_empty() {
-        println!("\n{}", "Used Dependencies:".green().bold());
-        for dep in &used_packages {
-            println!("- {}", dep.green());
-        }
-    } else {
-        println!("{}", "\nNo used dependencies found!".red());
-    }
-
+    // confirm deletion
     if !unused_dependencies.is_empty() {
-        println!("\n{}", "Unused Dependencies:".red().bold());
-        for dep in &unused_dependencies {
-            println!("- {}", dep.red());
+        if dry_run {
+            println!("{}", "Dry-run mode: No deletion will occur.".yellow());
+        } else {
+            if !ask_for_confirmation() {
+                println!("{}", "Operation cancelled.".red());
+                return;
+            }
         }
-    } else {
-        println!("{}", "\nNo unused dependencies found!".green());
     }
 
     // prune unused dependencies
@@ -160,39 +144,45 @@ fn reinstall_modules() {
 
 fn handle_unused_dependencies(unused_dependencies: &[String], dry_run: bool) {
     if dry_run {
-        println!(
-            "{}",
-            "\nDry-run mode enabled. The following dependencies would be deleted:".yellow()
-        );
+        println!("{}", "\nDry-run mode: Would delete:".yellow());
         for dep in unused_dependencies {
             println!("- {}", dep.yellow());
         }
-    } else {
-        println!(
-            "{}",
-            "\nProceeding to delete the unused dependencies..."
-                .red()
-                .bold()
-        );
+        return;
+    }
 
-        if !ask_for_confirmation() {
-            println!("{}", "Aborted!".red());
-            return;
-        }
+    if unused_dependencies.is_empty() {
+        return;
+    }
 
-        for dep in unused_dependencies {
-            if uninstall_dependency(dep, &detect_package_manager()) {
-                println!("{} {}", "Deleted:".green(), dep.green());
-            } else {
-                println!("{} {}", "Failed to delete:".red(), dep.red());
-            }
-        }
-
-        // reinstall dependencies
-        if !dry_run {
-            reinstall_modules();
+    println!("\n{}", "Review Unused Dependencies:".yellow().bold());
+    let mut to_delete = Vec::new();
+    for dep in unused_dependencies {
+        println!("Delete {}? (y/n)", dep.red());
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read input");
+        if input.trim().to_lowercase() == "y" {
+            to_delete.push(dep.clone());
         }
     }
+
+    if to_delete.is_empty() {
+        println!("{}", "No dependencies selected for deletion.".green());
+        return;
+    }
+
+    println!("{}", "Deleting selected dependencies...".red().bold());
+    for dep in &to_delete {
+        if uninstall_dependency(dep, &detect_package_manager()) {
+            println!("{} {}", "Deleted:".green(), dep.green());
+        } else {
+            println!("{} {}", "Failed to delete:".red(), dep.red());
+        }
+    }
+
+    reinstall_modules();
 }
 
 fn detect_package_manager() -> String {
@@ -250,4 +240,93 @@ fn should_ignore(path: &Path) -> bool {
         path.components()
             .any(|component| component.as_os_str() == OsStr::new(folder))
     })
+}
+
+fn get_required_dependencies() -> HashSet<String> {
+    let mut required = HashSet::new();
+    if let Ok(content) = fs::read_to_string("package-lock.json") {
+        if let Ok(lock) = serde_json::from_str::<Value>(&content) {
+            if let Some(deps) = lock.get("dependencies").and_then(|v| v.as_object()) {
+                for (dep, info) in deps {
+                    required.insert(dep.clone());
+                    if let Some(peer) = info.get("peerDependencies").and_then(|v| v.as_object()) {
+                        required.extend(peer.keys().cloned());
+                    }
+                }
+            }
+        }
+    }
+    // TODO: Add support for yarn.lock, pnpm-lock.yaml and bun.lock
+    required
+}
+
+fn read_cnpignore() -> HashSet<String> {
+    fs::read_to_string(".cnpignore")
+        .ok()
+        .map(|content| {
+            content
+                .lines()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn print_dependency_report(
+    dependencies: &HashSet<String>,
+    used_packages: &HashSet<String>,
+    unused_dependencies: &[String],
+    explored_files: &[String],
+) {
+    let mut table = Table::new();
+    table.set_header(vec!["Metric", "Value"]);
+    table.add_row(vec![Cell::new("Project"), Cell::new(PACKAGE_JSON_PATH)]);
+    table.add_row(vec![
+        Cell::new("Extensions"),
+        Cell::new(EXTENSIONS.join(", ")),
+    ]);
+    table.add_row(vec![
+        Cell::new("Ignored Folders"),
+        Cell::new(IGNORE_FOLDERS.join(", ")),
+    ]);
+    table.add_row(vec![
+        Cell::new("Explored Files"),
+        Cell::new(explored_files.len().to_string()),
+    ]);
+    table.add_row(vec![
+        Cell::new("Total Dependencies"),
+        Cell::new(dependencies.len().to_string()),
+    ]);
+    table.add_row(vec![
+        Cell::new("Used Dependencies"),
+        Cell::new(used_packages.len().to_string()).fg(Color::Green),
+    ]);
+    table.add_row(vec![
+        Cell::new("Unused Dependencies"),
+        Cell::new(unused_dependencies.len().to_string()).fg(Color::Red),
+    ]);
+    println!("\n{}", "Dependency Usage Report".bold().blue());
+    println!("{}", table);
+
+    if !used_packages.is_empty() {
+        println!("\n{}", "Used Dependencies:".green().bold());
+        for dep in used_packages {
+            println!("- {}", dep.green());
+        }
+    }
+
+    if !unused_dependencies.is_empty() {
+        println!("\n{}", "Unused Dependencies:".red().bold());
+        println!(
+            "{}",
+            "Note: Some may be required at runtime (e.g., react-dom).".yellow()
+        );
+        for dep in unused_dependencies {
+            println!("- {}", dep.red());
+        }
+    } else {
+        println!("\n{}", "No unused dependencies found!".green().bold());
+    }
 }
