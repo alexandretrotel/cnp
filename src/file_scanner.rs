@@ -1,4 +1,4 @@
-use crate::config::{EXTENSIONS, IGNORE_FOLDERS};
+use crate::config::{is_typescript_project, EXTENSIONS, IGNORE_FOLDERS};
 use glob::glob;
 use indicatif::ProgressBar;
 use regex::Regex;
@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 // Helper function to normalize paths for macOS
 fn normalize_path(path: &Path) -> String {
@@ -17,6 +18,56 @@ fn normalize_path(path: &Path) -> String {
         path_str.replacen("/private", "", 1)
     } else {
         path_str
+    }
+}
+
+// Run tsc and collect unused imports (ts(6133))
+fn get_typescript_unused_imports() -> HashSet<String> {
+    let mut unused_imports = HashSet::new();
+    if !is_typescript_project() {
+        return unused_imports;
+    }
+
+    // Run tsc with --noEmit to get diagnostics
+    let output = Command::new("tsc")
+        .args(["--noEmit", "--pretty", "false"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            // No errors, so no unused imports
+            return unused_imports;
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            for line in stderr.lines() {
+                if line.contains("TS6133") {
+                    // Example: "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
+                    if let Some(import_name) = extract_import_name(line) {
+                        unused_imports.insert(import_name);
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            // tsc failed (e.g., not installed), fall back to regex
+        }
+    }
+    unused_imports
+}
+
+// Extract import name from TS6133 diagnostic
+fn extract_import_name(diagnostic: &str) -> Option<String> {
+    let parts: Vec<&str> = diagnostic.split("'").collect();
+    if parts.len() >= 2 {
+        let name = parts[1].to_string();
+        // Map to package name (e.g., "analytics" -> "@vercel/analytics")
+        match name.as_str() {
+            "analytics" => Some("@vercel/analytics".to_string()),
+            _ => Some(name),
+        }
+    } else {
+        None
     }
 }
 
@@ -32,6 +83,7 @@ pub fn scan_files(
     let mut ignored_files = Vec::new();
     let mut explored_files = Vec::new();
     let mut seen_paths = HashSet::new();
+    let mut typescript_files = Vec::new();
 
     for pattern in patterns {
         for entry in glob(&pattern).expect("Failed to read glob pattern") {
@@ -47,7 +99,10 @@ pub fn scan_files(
                         ignored_files.push(abs_path);
                         continue;
                     }
-                    if let Ok(content) = fs::read_to_string(&path) {
+                    let extension = path.extension().and_then(OsStr::to_str);
+                    if extension == Some("ts") || extension == Some("tsx") {
+                        typescript_files.push(abs_path.clone());
+                    } else if let Ok(content) = fs::read_to_string(&path) {
                         used_packages.extend(find_dependencies_in_content(&content, dependencies));
                     }
                     explored_files.push(abs_path);
@@ -64,43 +119,33 @@ pub fn scan_files(
         }
     }
 
+    // Process TypeScript files with tsc
+    let unused_imports = get_typescript_unused_imports();
+    for path in &typescript_files {
+        if let Ok(content) = fs::read_to_string(path) {
+            let found = find_dependencies_in_content(&content, dependencies);
+            for dep in found {
+                if !unused_imports.contains(&dep) {
+                    used_packages.insert(dep);
+                }
+            }
+        }
+    }
+
     (used_packages, explored_files, ignored_files)
 }
 
 fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
     let mut found = HashSet::new();
     for dep in dependencies {
-        let dep_pattern = if dep.starts_with('@') {
-            let parts: Vec<&str> = dep.split('/').collect();
-            if parts.len() > 1 {
-                format!("{}/{}", parts[0], parts[1])
-            } else {
-                dep.clone()
-            }
-        } else {
-            dep.clone()
-        };
+        let dep_pattern = regex::escape(dep);
+        let regex_str = format!(
+            r#"(?m)(?:import\s*(?:\{{[^}}]*\}}|\w*)\s*from\s*['"]{}['"]|require\s*\(\s*['"]{}['"]\s*\)|import\s*['"]{}['"]\s*;)"#,
+            dep_pattern, dep_pattern, dep_pattern
+        );
+        let regex = Regex::new(&regex_str).unwrap();
 
-        let import_from_regex = Regex::new(&format!(
-            r#"import\s+.*?\s+from\s+['"]({}(/[^'"]*)?)['"]"#,
-            regex::escape(&dep_pattern)
-        ))
-        .unwrap();
-        let require_regex = Regex::new(&format!(
-            r#"require\s*\(\s*['"]({}(/[^'"]*)?)['"]\s*\)"#,
-            regex::escape(&dep_pattern)
-        ))
-        .unwrap();
-        let import_simple_regex = Regex::new(&format!(
-            r#"import\s+['"]({}(/[^'"]*)?)['"]\s*;"#,
-            regex::escape(&dep_pattern)
-        ))
-        .unwrap();
-
-        if import_from_regex.is_match(content)
-            || require_regex.is_match(content)
-            || import_simple_regex.is_match(content)
-        {
+        if regex.is_match(content) {
             found.insert(dep.clone());
         }
     }

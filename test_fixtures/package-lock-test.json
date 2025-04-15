@@ -13,7 +13,8 @@
         "react": "^18.2.0"
       },
       "devDependencies": {
-        "eslint": "^8.0.0"
+        "eslint": "^8.0.0",
+        "typescript": "^5.0.0"
       }
     },
     "node_modules/@eslint-community/eslint-utils": {
@@ -1259,6 +1260,20 @@
       },
       "funding": {
         "url": "https://github.com/sponsors/sindresorhus"
+      }
+    },
+    "node_modules/typescript": {
+      "version": "5.8.3",
+      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.8.3.tgz",
+      "integrity": "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==",
+      "dev": true,
+      "license": "Apache-2.0",
+      "bin": {
+        "tsc": "bin/tsc",
+        "tsserver": "bin/tsserver"
+      },
+      "engines": {
+        "node": ">=14.17"
       }
     },
     "node_modules/uri-js": {

@@ -16,8 +16,26 @@ cat > "$TEMP_DIR/package.json" << EOL
     "lodash": "^4.17.21"
   },
   "devDependencies": {
-    "eslint": "^8.0.0"
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
   }
+}
+EOL
+
+# Create tsconfig.json
+cat > "$TEMP_DIR/tsconfig.json" << EOL
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["*.ts"]
 }
 EOL
 
@@ -25,6 +43,7 @@ EOL
 cat > "$TEMP_DIR/index.js" << EOL
 import React from 'react';
 import { analytics } from '@vercel/analytics';
+import _ from 'lodash';
 
 // Example React component
 function App() {
@@ -44,6 +63,16 @@ EOL
 cat > "$TEMP_DIR/aliased.js" << EOL
 import { useState as useReactState } from 'react';
 import { analytics as vercelAnalytics } from '@vercel/analytics';
+EOL
+
+cat > "$TEMP_DIR/unused.ts" << EOL
+import { analytics } from '@vercel/analytics';
+import React from 'react';
+
+// Use React but not analytics
+export function Component() {
+  return React.createElement('div', null, 'No analytics used');
+}
 EOL
 
 # Function to clean node_modules and lock files
@@ -77,7 +106,7 @@ mv bun.lock bun-lock-test.lock
 clean_dir
 
 # Move lock files and fixture files to project root
-mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts aliased.js "$OLDPWD"
+mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts aliased.js unused.ts tsconfig.json "$OLDPWD"
 echo "Lock files and fixture files generated in $(pwd)"
 
 # Clean up
@@ -86,7 +115,7 @@ rm -rf "$TEMP_DIR"
 
 # Move lock files and fixture files to test_fixtures directory
 mkdir -p test_fixtures
-mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts aliased.js test_fixtures/
+mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts aliased.js unused.ts tsconfig.json test_fixtures/
 
 # Print success message
 echo "Lock files and fixture files generated and moved to test_fixtures directory."

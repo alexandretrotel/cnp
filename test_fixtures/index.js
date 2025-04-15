@@ -1,5 +1,6 @@
 import React from 'react';
 import { analytics } from '@vercel/analytics';
+import _ from 'lodash';
 
 // Example React component
 function App() {

@@ -379,12 +379,15 @@ mod tests {
     #[test]
     fn test_file_scanner_non_js_extensions() {
         let temp_dir = setup_temp_dir();
-        // Copy utils.ts from test_fixtures
+        // Copy unused.ts and tsconfig.json from test_fixtures
         let project_root = env::var("CARGO_MANIFEST_DIR").unwrap();
         let test_fixtures_dir = PathBuf::from(project_root).join("test_fixtures");
-        let utils_ts_src = test_fixtures_dir.join("utils.ts");
-        let utils_ts_dest = temp_dir.path().join("utils.ts");
-        fs::copy(&utils_ts_src, &utils_ts_dest).unwrap();
+        let unused_ts_src = test_fixtures_dir.join("unused.ts");
+        let tsconfig_src = test_fixtures_dir.join("tsconfig.json");
+        let unused_ts_dest = temp_dir.path().join("unused.ts");
+        let tsconfig_dest = temp_dir.path().join("tsconfig.json");
+        fs::copy(&unused_ts_src, &unused_ts_dest).unwrap();
+        fs::copy(&tsconfig_src, &tsconfig_dest).unwrap();
 
         let dependencies: HashSet<String> = ["react", "@vercel/analytics", "lodash"]
             .into_iter()
@@ -399,12 +402,12 @@ mod tests {
         let expected_used: HashSet<String> = ["react"].into_iter().map(String::from).collect();
         assert_eq!(
             used_packages, expected_used,
-            "Should detect react in .ts file"
+            "Should detect react in .ts file, but not @vercel/analytics due to TS6133"
         );
         assert_eq!(
             explored_files,
-            vec![utils_ts_dest.display().to_string()],
-            "Should explore utils.ts"
+            vec![unused_ts_dest.display().to_string()],
+            "Should explore unused.ts"
         );
         assert_eq!(
             ignored_files,
@@ -508,12 +511,12 @@ mod tests {
     fn test_unused_dependency_flagged_for_deletion() {
         let temp_dir = setup_temp_dir();
         let package_json_path = temp_dir.path().join("package.json");
-        // Create package.json with only lodash
+        // Create package.json with only @vercel/analytics
         let content = r#"{
         "name": "test-unused",
         "version": "1.0.0",
         "dependencies": {
-            "lodash": "^4.17.21"
+            "@vercel/analytics": "^1.0.0"
         }
     }"#;
         File::create(&package_json_path)
@@ -521,12 +524,15 @@ mod tests {
             .write_all(content.as_bytes())
             .unwrap();
 
-        // Copy utils.ts from test_fixtures (no lodash import)
+        // Copy unused.ts and tsconfig.json from test_fixtures
         let project_root = env::var("CARGO_MANIFEST_DIR").unwrap();
         let test_fixtures_dir = PathBuf::from(project_root).join("test_fixtures");
-        let utils_ts_src = test_fixtures_dir.join("utils.ts");
-        let utils_ts_dest = temp_dir.path().join("utils.ts");
-        fs::copy(&utils_ts_src, &utils_ts_dest).unwrap();
+        let unused_ts_src = test_fixtures_dir.join("unused.ts");
+        let tsconfig_src = test_fixtures_dir.join("tsconfig.json");
+        let unused_ts_dest = temp_dir.path().join("unused.ts");
+        let tsconfig_dest = temp_dir.path().join("tsconfig.json");
+        fs::copy(&unused_ts_src, &unused_ts_dest).unwrap();
+        fs::copy(&tsconfig_src, &tsconfig_dest).unwrap();
 
         std::env::set_current_dir(&temp_dir).unwrap();
         let pb = ProgressBar::new(1);
@@ -551,15 +557,15 @@ mod tests {
             .collect();
 
         // Verify unused dependency is flagged
-        let expected_unused: Vec<String> = vec!["lodash".to_string()];
+        let expected_unused: Vec<String> = vec!["@vercel/analytics".to_string()];
         assert_eq!(
             unused_dependencies, expected_unused,
-            "Should flag lodash as unused"
+            "Should flag @vercel/analytics as unused"
         );
         assert_eq!(
             explored_files,
-            vec![utils_ts_dest.display().to_string()],
-            "Should explore utils.ts"
+            vec![unused_ts_dest.display().to_string()],
+            "Should explore unused.ts"
         );
         assert_eq!(
             ignored_files,
@@ -579,7 +585,8 @@ mod tests {
             .get("dependencies")
             .and_then(serde_json::Value::as_object)
             .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
-        let expected_deps: HashSet<String> = vec!["lodash".to_string()].into_iter().collect();
+        let expected_deps: HashSet<String> =
+            vec!["@vercel/analytics".to_string()].into_iter().collect();
         assert_eq!(
             dependencies_after, expected_deps,
             "Dry-run should not modify package.json"
@@ -605,18 +612,18 @@ mod tests {
             .write_all(content.as_bytes())
             .unwrap();
 
-        // Copy fixture files from test_fixtures
+        // Copy unused.ts and tsconfig.json from test_fixtures
         let project_root = env::var("CARGO_MANIFEST_DIR").unwrap();
         let test_fixtures_dir = PathBuf::from(project_root).join("test_fixtures");
-        let index_js_src = test_fixtures_dir.join("index.js");
-        let utils_ts_src = test_fixtures_dir.join("utils.ts");
-        let index_js_dest = temp_dir.path().join("index.js");
-        let utils_ts_dest = temp_dir.path().join("utils.ts");
-        fs::copy(&index_js_src, &index_js_dest).unwrap();
-        fs::copy(&utils_ts_src, &utils_ts_dest).unwrap();
+        let unused_ts_src = test_fixtures_dir.join("unused.ts");
+        let tsconfig_src = test_fixtures_dir.join("tsconfig.json");
+        let unused_ts_dest = temp_dir.path().join("unused.ts");
+        let tsconfig_dest = temp_dir.path().join("tsconfig.json");
+        fs::copy(&unused_ts_src, &unused_ts_dest).unwrap();
+        fs::copy(&tsconfig_src, &tsconfig_dest).unwrap();
 
         std::env::set_current_dir(&temp_dir).unwrap();
-        let pb = ProgressBar::new(2);
+        let pb = ProgressBar::new(1);
 
         // Read dependencies
         let package_json = read_package_json("package.json").unwrap();
@@ -638,32 +645,21 @@ mod tests {
             .collect();
 
         // Verify unused dependencies
-        let mut expected_unused: Vec<String> = vec!["lodash".to_string()];
+        let mut expected_unused: Vec<String> =
+            vec!["lodash".to_string(), "@vercel/analytics".to_string()];
         expected_unused.sort();
         let mut actual_unused = unused_dependencies.clone();
         actual_unused.sort();
         assert_eq!(
             actual_unused, expected_unused,
-            "Should flag lodash as unused"
+            "Should flag lodash and @vercel/analytics as unused"
         );
-        let expected_used: HashSet<String> =
-            vec!["react".to_string(), "@vercel/analytics".to_string()]
-                .into_iter()
-                .collect();
+        let expected_used: HashSet<String> = vec!["react".to_string()].into_iter().collect();
+        assert_eq!(used_packages, expected_used, "Should detect react as used");
         assert_eq!(
-            used_packages, expected_used,
-            "Should detect react and @vercel/analytics as used"
-        );
-        let mut expected_explored = vec![
-            index_js_dest.display().to_string(),
-            utils_ts_dest.display().to_string(),
-        ];
-        expected_explored.sort();
-        let mut actual_explored = explored_files.clone();
-        actual_explored.sort();
-        assert_eq!(
-            actual_explored, expected_explored,
-            "Should explore index.js and utils.ts"
+            explored_files,
+            vec![unused_ts_dest.display().to_string()],
+            "Should explore unused.ts"
         );
         assert_eq!(
             ignored_files,
@@ -690,12 +686,15 @@ mod tests {
             .write_all(content.as_bytes())
             .unwrap();
 
-        // Copy utils.ts from test_fixtures (no imports for lodash or @vercel/analytics)
+        // Copy unused.ts and tsconfig.json from test_fixtures
         let project_root = env::var("CARGO_MANIFEST_DIR").unwrap();
         let test_fixtures_dir = PathBuf::from(project_root).join("test_fixtures");
-        let utils_ts_src = test_fixtures_dir.join("utils.ts");
-        let utils_ts_dest = temp_dir.path().join("utils.ts");
-        fs::copy(&utils_ts_src, &utils_ts_dest).unwrap();
+        let unused_ts_src = test_fixtures_dir.join("unused.ts");
+        let tsconfig_src = test_fixtures_dir.join("tsconfig.json");
+        let unused_ts_dest = temp_dir.path().join("unused.ts");
+        let tsconfig_dest = temp_dir.path().join("tsconfig.json");
+        fs::copy(&unused_ts_src, &unused_ts_dest).unwrap();
+        fs::copy(&tsconfig_src, &tsconfig_dest).unwrap();
 
         std::env::set_current_dir(&temp_dir).unwrap();
         let pb = ProgressBar::new(1);
@@ -752,8 +751,8 @@ mod tests {
         );
         assert_eq!(
             explored_files,
-            vec![utils_ts_dest.display().to_string()],
-            "Should explore utils.ts"
+            vec![unused_ts_dest.display().to_string()],
+            "Should explore unused.ts"
         );
         assert_eq!(
             ignored_files,
