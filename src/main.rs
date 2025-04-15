@@ -17,6 +17,40 @@ use report::print_dependency_report;
 use std::collections::HashSet;
 use uninstall::handle_unused_dependencies;
 
+/// Entry point for the dependency analysis tool.
+///
+/// This function orchestrates the process of analyzing a project's dependencies by:
+/// - Parsing command-line arguments to determine modes (`--dry-run`, `--interactive`, `--all`).
+/// - Reading the `package.json` file to extract dependencies.
+/// - Scanning project files to identify used dependencies.
+/// - Comparing used and declared dependencies to find unused ones, respecting required and ignored dependencies.
+/// - Printing a dependency report.
+/// - Handling unused dependencies (e.g., prompting for removal) based on the provided flags.
+///
+/// The program exits with a status code of 1 if `package.json` cannot be read or parsed.
+/// A progress bar provides visual feedback during initialization and file scanning.
+///
+/// # Command-line Arguments
+///
+/// - `--dry-run`: Simulates actions without making changes (e.g., no uninstalls).
+/// - `--interactive` or `-i`: Prompts the user before taking actions on unused dependencies.
+/// - `--all` or `-a`: Automatically processes all unused dependencies without prompting.
+///
+/// # Examples
+///
+/// ```bash
+/// # Run the tool in default mode
+/// cargo run
+///
+/// # Run in dry-run mode to simulate actions
+/// cargo run -- --dry-run
+///
+/// # Run in interactive mode to confirm actions
+/// cargo run -- --interactive
+///
+/// # Process all unused dependencies automatically
+/// cargo run -- --all
+/// ```
 fn main() {
     // Parse command-line arguments
     let args: Vec<String> = std::env::args().collect();

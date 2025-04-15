@@ -15,6 +15,22 @@ pub const IGNORE_FOLDERS: [&str; 10] = [
     "output",
 ];
 
+/// Checks if the current directory is a TypeScript project by looking for a `tsconfig.json` file.
+///
+/// # Returns
+///
+/// Returns `true` if a `tsconfig.json` file exists in the current directory, indicating a TypeScript project.
+/// Returns `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// if is_typescript_project() {
+///     println!("This is a TypeScript project!");
+/// } else {
+///     println!("This is not a TypeScript project.");
+/// }
+/// ```
 pub fn is_typescript_project() -> bool {
     Path::new("tsconfig.json").exists()
 }

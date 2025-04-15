@@ -7,6 +7,25 @@ use std::io::{self};
 use std::path::Path;
 use std::process::Command;
 
+/// Reinstalls the project's `node_modules` directory.
+///
+/// This function removes the existing `node_modules` directory (if present) and runs the
+/// appropriate package manager's install command (e.g., `npm install`, `yarn install`) to
+/// reinstall dependencies. A progress spinner provides feedback during the process.
+///
+/// # Output
+///
+/// Prints success or failure messages to the console via a progress spinner:
+/// - Success: "Reinstallation successful!" (in green).
+/// - Failure: An error message (in red) if removal or installation fails.
+///
+/// # Examples
+///
+/// ```
+/// reinstall_modules();
+/// // If `node_modules` exists, it is deleted and reinstalled with the detected package manager.
+/// // Outputs a spinner with status messages.
+/// ```
 pub fn reinstall_modules() {
     let pb = create_spinner("Reinstalling node_modules...");
 
@@ -35,6 +54,45 @@ pub fn reinstall_modules() {
     }
 }
 
+/// Handles the deletion of unused dependencies based on user preferences.
+///
+/// This function processes unused dependencies, allowing deletion in three modes:
+/// - Dry-run: Lists dependencies that would be deleted without making changes.
+/// - Interactive: Prompts the user to select dependencies to delete.
+/// - All: Deletes all unused dependencies after confirmation.
+/// If no mode is specified, it prompts the user to use `--interactive` or `--all`.
+/// Successfully deleted dependencies trigger a reinstall of `node_modules`.
+///
+/// # Arguments
+///
+/// * `unused_dependencies` - A slice of `String` containing unused dependency names.
+/// * `dry_run` - If `true`, simulates deletion without making changes.
+/// * `interactive` - If `true`, prompts the user to select dependencies to delete.
+/// * `all` - If `true`, deletes all unused dependencies after confirmation.
+///
+/// # Output
+///
+/// Prints to the console:
+/// - In dry-run mode: A list of dependencies that would be deleted.
+/// - In interactive mode: A selection prompt for dependencies.
+/// - In all mode: A confirmation prompt.
+/// - Progress bar updates for each deletion attempt (success in green, failure in red).
+/// - A final message indicating completion and, if deletions occurred, a reinstallation message.
+///
+/// # Examples
+///
+/// ```
+/// let unused = vec!["lodash".to_string(), "react".to_string()];
+/// handle_unused_dependencies(&unused, true, false, false);
+/// // Prints a dry-run list of dependencies without deleting.
+/// // Output: "Dry-run mode: No changes will be made."
+/// //         "Would delete:"
+/// //         "- lodash"
+/// //         "- react"
+///
+/// handle_unused_dependencies(&unused, false, true, false);
+/// // Prompts interactively to select dependencies for deletion.
+/// ```
 pub fn handle_unused_dependencies(
     unused_dependencies: &[String],
     dry_run: bool,
@@ -94,6 +152,27 @@ pub fn handle_unused_dependencies(
     }
 }
 
+/// Prompts the user to interactively select dependencies for deletion.
+///
+/// Displays a multi-select interface where the user can choose which dependencies to delete from
+/// the provided list. All dependencies are selected by default.
+///
+/// # Arguments
+///
+/// * `unused_dependencies` - A slice of `String` containing unused dependency names.
+///
+/// # Returns
+///
+/// Returns a `Vec<String>` containing the names of dependencies selected for deletion.
+/// Returns an empty vector if the user cancels or no selections are made.
+///
+/// # Examples
+///
+/// ```
+/// let unused = vec!["lodash".to_string(), "react".to_string()];
+/// let selected = select_dependencies_interactively(&unused);
+/// // Displays a prompt; if user selects "lodash", returns ["lodash"].
+/// ```
 fn select_dependencies_interactively(unused_dependencies: &[String]) -> Vec<String> {
     println!("\n{}", "Select dependencies to delete:".cyan().bold());
     let defaults = vec![true; unused_dependencies.len()];
@@ -113,6 +192,27 @@ fn select_dependencies_interactively(unused_dependencies: &[String]) -> Vec<Stri
     }
 }
 
+/// Prompts the user to confirm deletion of all unused dependencies.
+///
+/// Displays a yes/no prompt asking the user to confirm deleting all provided dependencies.
+///
+/// # Arguments
+///
+/// * `unused_dependencies` - A slice of `String` containing unused dependency names.
+///
+/// # Returns
+///
+/// Returns a `Vec<String>` containing all dependency names if the user confirms with "y".
+/// Returns an empty vector if the user declines or input fails.
+///
+/// # Examples
+///
+/// ```
+/// let unused = vec!["lodash".to_string(), "react".to_string()];
+/// let confirmed = confirm_all_deletion(&unused);
+/// // Prompts "Confirm deletion of all unused dependencies? (y/n)".
+/// // If user inputs "y", returns ["lodash", "react"]; otherwise, returns [].
+/// ```
 fn confirm_all_deletion(unused_dependencies: &[String]) -> Vec<String> {
     println!(
         "\n{}",
@@ -129,6 +229,30 @@ fn confirm_all_deletion(unused_dependencies: &[String]) -> Vec<String> {
     }
 }
 
+/// Uninstalls a single dependency using the specified package manager.
+///
+/// Executes the package manager's uninstall command (e.g., `npm uninstall <dependency>`) for the
+/// given dependency.
+///
+/// # Arguments
+///
+/// * `dependency` - The name of the dependency to uninstall.
+/// * `package_manager` - The name of the package manager to use (e.g., "npm", "yarn").
+///
+/// # Returns
+///
+/// Returns `true` if the uninstall command succeeds, `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// let success = uninstall_dependency("lodash", "npm");
+/// if success {
+///     println!("Successfully uninstalled lodash");
+/// } else {
+///     println!("Failed to uninstall lodash");
+/// }
+/// ```
 fn uninstall_dependency(dependency: &str, package_manager: &str) -> bool {
     let output = Command::new(package_manager)
         .args(["uninstall", dependency])

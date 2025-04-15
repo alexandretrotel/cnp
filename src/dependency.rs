@@ -4,11 +4,52 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+/// Reads and parses a `package.json` file into a JSON value.
+///
+/// # Arguments
+///
+/// * `path` - A string slice representing the path to the `package.json` file.
+///
+/// # Returns
+///
+/// Returns `Ok(Value)` containing the parsed JSON if successful.
+/// Returns `Err(String)` with an error message if the file is not found or contains invalid JSON.
+///
+/// # Examples
+///
+/// ```
+/// match read_package_json("package.json") {
+///     Ok(json) => println!("Successfully parsed package.json: {:?}", json),
+///     Err(e) => eprintln!("Failed to read package.json: {}", e),
+/// }
+/// ```
 pub fn read_package_json(path: &str) -> Result<Value, String> {
     let content = fs::read_to_string(path).map_err(|_| format!("Error: `{}` not found.", path))?;
     serde_json::from_str(&content).map_err(|_| "Error: Invalid JSON in package.json.".to_string())
 }
 
+/// Collects all required dependencies from `package.json` and supported lockfiles.
+///
+/// This function checks for `package.json` and lockfiles (`package-lock.json`, `yarn.lock`,
+/// `pnpm-lock.yaml`, `bun.lock`) to gather dependencies. If multiple lockfiles are detected,
+/// it warns the user and returns an empty set to avoid ambiguity.
+///
+/// # Returns
+///
+/// Returns a `HashSet<String>` containing the names of all required dependencies (from
+/// `dependencies`, `devDependencies`, and lockfiles). Returns an empty set if multiple
+/// lockfiles are detected or if no valid dependencies are found.
+///
+/// # Examples
+///
+/// ```
+/// let deps = get_required_dependencies();
+/// if !deps.is_empty() {
+///     println!("Required dependencies: {:?}", deps);
+/// } else {
+///     println!("No dependencies found or multiple lockfiles detected.");
+/// }
+/// ```
 pub fn get_required_dependencies() -> HashSet<String> {
     let mut required = HashSet::new();
     let lockfiles = [
@@ -140,6 +181,26 @@ pub fn get_required_dependencies() -> HashSet<String> {
     required
 }
 
+/// Reads a `.cnpignore` file and returns its non-comment, non-empty lines as a set.
+///
+/// The function parses the `.cnpignore` file, ignoring empty lines, lines starting with `#`,
+/// and inline comments (text after `#`). If the file is not found, an empty set is returned.
+///
+/// # Returns
+///
+/// Returns a `HashSet<String>` containing the trimmed, non-empty, non-comment lines from
+/// the `.cnpignore` file. Returns an empty set if the file does not exist or cannot be read.
+///
+/// # Examples
+///
+/// ```
+/// let ignore_patterns = read_cnpignore();
+/// if !ignore_patterns.is_empty() {
+///     println!("Ignore patterns: {:?}", ignore_patterns);
+/// } else {
+///     println!("No .cnpignore patterns found.");
+/// }
+/// ```
 pub fn read_cnpignore() -> HashSet<String> {
     fs::read_to_string(".cnpignore")
         .map(|content| {

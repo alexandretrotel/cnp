@@ -8,7 +8,28 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-// Helper function to normalize paths for macOS
+/// Normalizes a file path for consistent handling across platforms, especially macOS.
+///
+/// On macOS, this function removes the `/private` prefix from paths if present, which can appear
+/// due to temporary filesystem mounts. It also attempts to canonicalize the path to its absolute form.
+///
+/// # Arguments
+///
+/// * `path` - A reference to a `Path` to normalize.
+///
+/// # Returns
+///
+/// Returns a `String` representing the normalized path. If canonicalization fails, returns the
+/// original path as a string.
+///
+/// # Examples
+///
+/// ```
+/// let path = Path::new("/private/tmp/file.txt");
+/// let normalized = normalize_path(path);
+/// // On macOS, might return "/tmp/file.txt"
+/// println!("Normalized path: {}", normalized);
+/// ```
 fn normalize_path(path: &Path) -> String {
     let path_str = fs::canonicalize(path)
         .map(|p| p.display().to_string())
@@ -21,7 +42,26 @@ fn normalize_path(path: &Path) -> String {
     }
 }
 
-// Run tsc and collect unused imports (ts(6133))
+/// Runs the TypeScript compiler (`tsc`) to detect unused imports (TS6133 errors).
+///
+/// This function executes `tsc --noEmit --pretty false` to collect diagnostics for unused imports
+/// in a TypeScript project. If `tsc` fails or no TypeScript project is detected, it returns an empty set.
+///
+/// # Returns
+///
+/// Returns a `HashSet<String>` containing the names of unused imports identified by TS6133 errors.
+/// Returns an empty set if the project is not TypeScript, `tsc` fails, or no unused imports are found.
+///
+/// # Examples
+///
+/// ```
+/// let unused = get_typescript_unused_imports();
+/// if !unused.is_empty() {
+///     println!("Unused imports: {:?}", unused);
+/// } else {
+///     println!("No unused imports detected.");
+/// }
+/// ```
 fn get_typescript_unused_imports() -> HashSet<String> {
     let mut unused_imports = HashSet::new();
     if !is_typescript_project() {
@@ -56,7 +96,28 @@ fn get_typescript_unused_imports() -> HashSet<String> {
     unused_imports
 }
 
-// Extract import name from TS6133 diagnostic
+/// Extracts the import name from a TypeScript TS6133 diagnostic message.
+///
+/// Parses a diagnostic message to retrieve the name of an unused import. Special cases are handled,
+/// such as mapping known imports (e.g., "analytics" to "@vercel/analytics").
+///
+/// # Arguments
+///
+/// * `diagnostic` - A string slice containing the TS6133 diagnostic message.
+///
+/// # Returns
+///
+/// Returns `Some(String)` with the extracted import name if parsing succeeds, or `None` if the
+/// diagnostic format is invalid or no name is found.
+///
+/// # Examples
+///
+/// ```
+/// let diagnostic = "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read.";
+/// if let Some(name) = extract_import_name(diagnostic) {
+///     println!("Unused import: {}", name); // Prints "Unused import: @vercel/analytics"
+/// }
+/// ```
 fn extract_import_name(diagnostic: &str) -> Option<String> {
     let parts: Vec<&str> = diagnostic.split("'").collect();
     if parts.len() >= 2 {
@@ -71,6 +132,34 @@ fn extract_import_name(diagnostic: &str) -> Option<String> {
     }
 }
 
+/// Scans project files to identify used dependencies, explored files, and ignored files.
+///
+/// This function searches for files matching configured extensions (e.g., `.js`, `.ts`) using glob
+/// patterns, processes their content to find dependency usage, and respects ignore rules (e.g., for
+/// folders like `node_modules`). For TypeScript files, it integrates with `tsc` to exclude unused imports.
+///
+/// # Arguments
+///
+/// * `dependencies` - A reference to a `HashSet<String>` containing the project's dependencies.
+/// * `pb` - A reference to a `ProgressBar` for tracking scanning progress.
+///
+/// # Returns
+///
+/// Returns a tuple `(HashSet<String>, Vec<String>, Vec<String>)` containing:
+/// - A `HashSet<String>` of used dependency names.
+/// - A `Vec<String>` of explored file paths (normalized).
+/// - A `Vec<String>` of ignored file or directory paths (normalized).
+///
+/// # Examples
+///
+/// ```
+/// let dependencies = HashSet::new();
+/// let pb = ProgressBar::new(100);
+/// let (used, explored, ignored) = scan_files(&dependencies, &pb);
+/// println!("Used dependencies: {:?}", used);
+/// println!("Explored files: {:?}", explored);
+/// println!("Ignored files: {:?}", ignored);
+/// ```
 pub fn scan_files(
     dependencies: &HashSet<String>,
     pb: &ProgressBar,
@@ -135,6 +224,31 @@ pub fn scan_files(
     (used_packages, explored_files, ignored_files)
 }
 
+/// Searches file content for references to project dependencies using regex patterns.
+///
+/// This function builds regex patterns to match common import/require statements for each dependency
+/// and checks if they appear in the provided content.
+///
+/// # Arguments
+///
+/// * `content` - A string slice containing the file content to search.
+/// * `dependencies` - A reference to a `HashSet<String>` containing dependency names to look for.
+///
+/// # Returns
+///
+/// Returns a `HashSet<String>` containing the names of dependencies found in the content.
+///
+/// # Examples
+///
+/// ```
+/// let content = r#"import { foo } from "lodash"; require("moment");"#;
+/// let mut deps = HashSet::new();
+/// deps.insert("lodash".to_string());
+/// deps.insert("moment".to_string());
+/// let found = find_dependencies_in_content(content, &deps);
+/// assert!(found.contains("lodash"));
+/// assert!(found.contains("moment"));
+/// ```
 fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
     let mut found = HashSet::new();
     for dep in dependencies {
@@ -152,6 +266,26 @@ fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -
     found
 }
 
+/// Determines if a path should be ignored based on configured ignore folders.
+///
+/// Checks if any component of the path matches a folder in the `IGNORE_FOLDERS` list (e.g., `node_modules`).
+///
+/// # Arguments
+///
+/// * `path` - A reference to a `Path` to check.
+///
+/// # Returns
+///
+/// Returns `true` if the path contains an ignored folder, `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// let path = Path::new("node_modules/package/file.js");
+/// assert!(should_ignore(&path)); // node_modules is ignored
+/// let path = Path::new("src/file.js");
+/// assert!(!should_ignore(&path)); // src is not ignored
+/// ```
 fn should_ignore(path: &Path) -> bool {
     path.components().any(|component| {
         IGNORE_FOLDERS

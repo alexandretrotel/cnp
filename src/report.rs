@@ -3,6 +3,53 @@ use colored::*;
 use comfy_table::{Cell, Color, Table};
 use std::collections::HashSet;
 
+/// Prints a formatted dependency usage report to the console.
+///
+/// This function generates a tabular report summarizing dependency analysis results, including
+/// project details, file scanning metrics, and dependency usage. It also lists used and unused
+/// dependencies with color-coded formatting. If no unused dependencies are found, a success message
+/// is displayed. A note about potential runtime-required dependencies (e.g., `react-dom`) is included
+/// when unused dependencies are listed.
+///
+/// # Arguments
+///
+/// * `dependencies` - A reference to a `HashSet<String>` containing all declared dependencies.
+/// * `used_packages` - A reference to a `HashSet<String>` containing dependencies found in use.
+/// * `unused_dependencies` - A slice of `String` containing unused dependency names.
+/// * `explored_files` - A slice of `String` containing paths of explored files.
+/// * `ignored_files` - A slice of `String` containing paths of ignored files.
+///
+/// # Output
+///
+/// Prints to the console:
+/// - A table with metrics (project path, extensions, ignored folders, file counts, dependency counts).
+/// - A sorted list of used dependencies (in green).
+/// - A sorted list of unused dependencies (in red) with a warning about runtime requirements, or a
+///   success message if none are found.
+///
+/// # Examples
+///
+/// ```
+/// let dependencies: HashSet<String> = ["lodash", "react"].into_iter().map(String::from).collect();
+/// let used_packages: HashSet<String> = ["lodash"].into_iter().map(String::from).collect();
+/// let unused_dependencies = vec!["react".to_string()];
+/// let explored_files = vec!["src/index.js".to_string()];
+/// let ignored_files = vec!["node_modules/lodash/index.js".to_string()];
+///
+/// print_dependency_report(
+///     &dependencies,
+///     &used_packages,
+///     &unused_dependencies,
+///     &explored_files,
+///     &ignored_files,
+/// );
+/// // Prints a table with metrics, followed by:
+/// // Used Dependencies:
+/// // - lodash (in green)
+/// // Unused Dependencies:
+/// // Note: Some may be required at runtime (e.g., react-dom).
+/// // - react (in red)
+/// ```
 pub fn print_dependency_report(
     dependencies: &HashSet<String>,
     used_packages: &HashSet<String>,
