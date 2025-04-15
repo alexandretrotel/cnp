@@ -517,4 +517,217 @@ mod tests {
             "Should return empty set for malformed pnpm-lock.yaml"
         );
     }
+
+    #[test]
+    fn test_unused_dependency_flagged_for_deletion() {
+        let temp_dir = setup_temp_dir();
+        let package_json_path = temp_dir.path().join("package.json");
+        // Create a package.json with an unused dependency
+        let content = r#"{
+        "name": "test-unused",
+        "version": "1.0.0",
+        "dependencies": {
+            "lodash": "^4.17.21"
+        }
+    }"#;
+        File::create(&package_json_path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+
+        // Create an empty JS file to scan
+        let js_file_path = temp_dir.path().join("index.js");
+        File::create(&js_file_path).unwrap();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let pb = ProgressBar::new(1);
+
+        // Read dependencies
+        let package_json = read_package_json("package.json").unwrap();
+        let dependencies: HashSet<String> = package_json
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
+
+        // Scan files
+        let (used_packages, explored_files, ignored_files) = scan_files(&dependencies, &pb);
+
+        // Identify unused dependencies
+        let required_deps = get_required_dependencies();
+        let ignored_deps = read_cnpignore();
+        let unused_dependencies: Vec<String> = dependencies
+            .difference(&used_packages)
+            .filter(|dep| !required_deps.contains(*dep) && !ignored_deps.contains(*dep))
+            .cloned()
+            .collect();
+
+        // Verify unused dependency is flagged
+        let expected_unused: Vec<String> = vec!["lodash".to_string()];
+        assert_eq!(
+            unused_dependencies, expected_unused,
+            "Should flag lodash as unused"
+        );
+        assert_eq!(
+            explored_files,
+            vec![js_file_path.display().to_string()],
+            "Should explore index.js"
+        );
+        assert_eq!(
+            ignored_files,
+            Vec::<String>::new(),
+            "No files should be ignored"
+        );
+
+        // Test dry-run
+        let dry_run = true;
+        let interactive = false;
+        let all = false;
+        handle_unused_dependencies(&unused_dependencies, dry_run, interactive, all);
+
+        // Verify package.json is unchanged
+        let package_json_after = read_package_json("package.json").unwrap();
+        let dependencies_after: HashSet<String> = package_json_after
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
+        let expected_deps: HashSet<String> = vec!["lodash".to_string()].into_iter().collect();
+        assert_eq!(
+            dependencies_after, expected_deps,
+            "Dry-run should not modify package.json"
+        );
+    }
+
+    #[test]
+    fn test_mixed_used_and_unused_dependencies() {
+        let temp_dir = setup_temp_dir();
+        let package_json_path = temp_dir.path().join("package.json");
+        // Create a package.json with mixed dependencies
+        let content = r#"{
+        "name": "test-mixed",
+        "version": "1.0.0",
+        "dependencies": {
+            "react": "^18.2.0",
+            "lodash": "^4.17.21",
+            "@vercel/analytics": "^1.0.0"
+        }
+    }"#;
+        File::create(&package_json_path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+
+        // Create a JS file that only imports react
+        let js_file_path = temp_dir.path().join("index.js");
+        let js_content = r#"import React from 'react';"#;
+        File::create(&js_file_path)
+            .unwrap()
+            .write_all(js_content.as_bytes())
+            .unwrap();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let pb = ProgressBar::new(1);
+
+        // Read dependencies
+        let package_json = read_package_json("package.json").unwrap();
+        let dependencies: HashSet<String> = package_json
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
+
+        // Scan files
+        let (used_packages, _explored_files, _ignored_files) = scan_files(&dependencies, &pb);
+
+        // Identify unused dependencies
+        let required_deps = get_required_dependencies();
+        let ignored_deps = read_cnpignore();
+        let unused_dependencies: Vec<String> = dependencies
+            .difference(&used_packages)
+            .filter(|dep| !required_deps.contains(*dep) && !ignored_deps.contains(*dep))
+            .cloned()
+            .collect();
+
+        // Verify unused dependencies
+        let mut expected_unused: Vec<String> =
+            vec!["lodash".to_string(), "@vercel/analytics".to_string()];
+        expected_unused.sort();
+        let mut actual_unused = unused_dependencies.clone();
+        actual_unused.sort();
+        assert_eq!(
+            actual_unused, expected_unused,
+            "Should flag lodash and @vercel/analytics as unused"
+        );
+        assert_eq!(
+            used_packages,
+            vec!["react".to_string()]
+                .into_iter()
+                .collect::<HashSet<String>>(),
+            "Should detect react as used"
+        );
+    }
+
+    #[test]
+    fn test_dry_run_lists_unused_without_deletion() {
+        let temp_dir = setup_temp_dir();
+        let package_json_path = temp_dir.path().join("package.json");
+        // Create a package.json with unused dependencies
+        let content = r#"{
+        "name": "test-dry-run",
+        "version": "1.0.0",
+        "dependencies": {
+            "lodash": "^4.17.21",
+            "@vercel/analytics": "^1.0.0"
+        }
+    }"#;
+        File::create(&package_json_path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+
+        // Create an empty JS file
+        let js_file_path = temp_dir.path().join("index.js");
+        File::create(&js_file_path).unwrap();
+
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let pb = ProgressBar::new(1);
+
+        // Read dependencies
+        let package_json = read_package_json("package.json").unwrap();
+        let dependencies: HashSet<String> = package_json
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
+
+        // Scan files
+        let (used_packages, _explored_files, _ignored_files) = scan_files(&dependencies, &pb);
+
+        // Identify unused dependencies
+        let required_deps = get_required_dependencies();
+        let ignored_deps = read_cnpignore();
+        let unused_dependencies: Vec<String> = dependencies
+            .difference(&used_packages)
+            .filter(|dep| !required_deps.contains(*dep) && !ignored_deps.contains(*dep))
+            .cloned()
+            .collect();
+
+        // Run dry-run
+        let dry_run = true;
+        let interactive = false;
+        let all = false;
+        handle_unused_dependencies(&unused_dependencies, dry_run, interactive, all);
+
+        // Verify package.json is unchanged
+        let package_json_after = read_package_json("package.json").unwrap();
+        let dependencies_after: HashSet<String> = package_json_after
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .map_or_else(HashSet::new, |map| map.keys().cloned().collect());
+        let expected_deps: HashSet<String> =
+            vec!["lodash".to_string(), "@vercel/analytics".to_string()]
+                .into_iter()
+                .collect();
+        assert_eq!(
+            dependencies_after, expected_deps,
+            "Dry-run should not modify package.json"
+        );
+    }
 }
