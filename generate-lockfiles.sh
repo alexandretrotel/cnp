@@ -42,7 +42,6 @@ EOL
 # Create fixture JavaScript and TypeScript files
 cat > "$TEMP_DIR/index.js" << EOL
 import React from 'react';
-import { analytics } from '@vercel/analytics';
 import _ from 'lodash';
 
 // Example React component
