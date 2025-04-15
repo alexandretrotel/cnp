@@ -21,6 +21,26 @@ cat > "$TEMP_DIR/package.json" << EOL
 }
 EOL
 
+# Create fixture JavaScript and TypeScript files
+cat > "$TEMP_DIR/index.js" << EOL
+import React from 'react';
+import { analytics } from '@vercel/analytics';
+
+// Example React component
+function App() {
+  return <div>Hello World</div>;
+}
+EOL
+
+cat > "$TEMP_DIR/utils.ts" << EOL
+import React from 'react';
+
+// Utility function using React
+export function renderComponent() {
+  return React.createElement('div', null, 'Test');
+}
+EOL
+
 # Function to clean node_modules and lock files
 clean_dir() {
   rm -rf node_modules package-lock.json yarn.lock pnpm-lock.yaml bun.lock
@@ -51,17 +71,18 @@ bun install
 mv bun.lock bun-lock-test.lock
 clean_dir
 
-# Move lock files to project root
-mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock "$OLDPWD"
-echo "Lock files generated in $(pwd)"
+# Move lock files and fixture files to project root
+mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts "$OLDPWD"
+echo "Lock files and fixture files generated in $(pwd)"
 
 # Clean up
 cd "$OLDPWD"
 rm -rf "$TEMP_DIR"
 
-# Move lock files to test_fixtures directory
-mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock test_fixtures/
+# Move lock files and fixture files to test_fixtures directory
+mkdir -p test_fixtures
+mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts test_fixtures/
 
 # Print success message
-echo "Lock files generated and moved to test_fixtures directory."
+echo "Lock files and fixture files generated and moved to test_fixtures directory."
 echo "All done!"
