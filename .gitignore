@@ -1,5 +1,5 @@
 # Output directories
-target/
+target/**
 
 # Environment files
 .env
@@ -13,3 +13,13 @@ todo.txt
 
 # DS_Store
 .DS_Store
+
+bun.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+Cargo.lock
+uv.lock
+node_modules/**
+dist/**
+build/**
