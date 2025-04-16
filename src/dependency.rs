@@ -78,6 +78,8 @@ pub fn get_required_dependencies() -> HashSet<String> {
         if let Some(deps) = package_json.get("dependencies").and_then(Value::as_object) {
             required.extend(deps.keys().cloned());
         }
+
+        // TODO: review the devDependencies logic (handle them in a different case)
         if let Some(dev_deps) = package_json
             .get("devDependencies")
             .and_then(Value::as_object)
@@ -102,6 +104,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
                                     .next()
                                     .unwrap_or("")
                                     .to_string();
+
                                 if !package_name.is_empty() {
                                     required.insert(package_name);
                                 }
@@ -126,6 +129,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
                                 .next()
                                 .unwrap_or("")
                                 .to_string();
+
                             if !package_name.is_empty() {
                                 required.insert(package_name);
                             }
@@ -139,7 +143,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
                     if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
                         if let Some(deps) = yaml
                             .get("dependencies")
-                            .or_else(|| yaml.get("devDependencies"))
+                            .or_else(|| yaml.get("devDependencies")) // TODO: review the devDependencies logic
                             .and_then(|v| v.as_mapping())
                         {
                             for key in deps.keys() {
@@ -165,8 +169,10 @@ pub fn get_required_dependencies() -> HashSet<String> {
                             {
                                 required.extend(deps.keys().cloned());
                             }
+
                             if let Some(dev_deps) =
                                 workspaces.get("devDependencies").and_then(Value::as_object)
+                            // TODO: review the devDependencies logic
                             {
                                 required.extend(dev_deps.keys().cloned());
                             }

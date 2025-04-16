@@ -59,8 +59,6 @@ pub fn reinstall_modules() {
 /// This function processes unused dependencies, allowing deletion in three modes:
 /// - Dry-run: Lists dependencies that would be deleted without making changes.
 /// - Interactive: Prompts the user to select dependencies to delete.
-/// - All: Deletes all unused dependencies after confirmation.
-/// If no mode is specified, it prompts the user to use `--interactive` or `--all`.
 /// Successfully deleted dependencies trigger a reinstall of `node_modules`.
 ///
 /// # Arguments
@@ -68,14 +66,12 @@ pub fn reinstall_modules() {
 /// * `unused_dependencies` - A slice of `String` containing unused dependency names.
 /// * `dry_run` - If `true`, simulates deletion without making changes.
 /// * `interactive` - If `true`, prompts the user to select dependencies to delete.
-/// * `all` - If `true`, deletes all unused dependencies after confirmation.
 ///
 /// # Output
 ///
 /// Prints to the console:
 /// - In dry-run mode: A list of dependencies that would be deleted.
 /// - In interactive mode: A selection prompt for dependencies.
-/// - In all mode: A confirmation prompt.
 /// - Progress bar updates for each deletion attempt (success in green, failure in red).
 /// - A final message indicating completion and, if deletions occurred, a reinstallation message.
 ///
@@ -83,21 +79,20 @@ pub fn reinstall_modules() {
 ///
 /// ```
 /// let unused = vec!["lodash".to_string(), "react".to_string()];
-/// handle_unused_dependencies(&unused, true, false, false);
+/// handle_unused_dependencies(&unused, true, false);
 /// // Prints a dry-run list of dependencies without deleting.
 /// // Output: "Dry-run mode: No changes will be made."
 /// //         "Would delete:"
 /// //         "- lodash"
 /// //         "- react"
 ///
-/// handle_unused_dependencies(&unused, false, true, false);
+/// handle_unused_dependencies(&unused, false, true);
 /// // Prompts interactively to select dependencies for deletion.
 /// ```
 pub fn handle_unused_dependencies(
     unused_dependencies: &[String],
     dry_run: bool,
     interactive: bool,
-    all: bool,
 ) {
     if dry_run {
         println!(
@@ -105,24 +100,19 @@ pub fn handle_unused_dependencies(
             "Dry-run mode: No changes will be made.".yellow().bold()
         );
         println!("{}", "Would delete:".yellow());
+
         for dep in unused_dependencies {
             println!("- {}", dep.yellow());
         }
+
         return;
     }
 
     let package_manager = detect_package_manager();
     let to_delete = if interactive {
         select_dependencies_interactively(unused_dependencies)
-    } else if all {
-        confirm_all_deletion(unused_dependencies)
     } else {
-        println!(
-            "\nUse {} or {} to delete unused dependencies.",
-            "--interactive (-i)".cyan(),
-            "--all (-a)".cyan()
-        );
-        return;
+        confirm_all_deletion(unused_dependencies)
     };
 
     if to_delete.is_empty() {
@@ -137,14 +127,17 @@ pub fn handle_unused_dependencies(
     let mut deleted = Vec::new();
     for dep in &to_delete {
         pb.inc(1);
+
         if uninstall_dependency(dep, &package_manager) {
             pb.set_message(format!("Deleted: {}", dep).green().to_string());
             deleted.push(dep.clone());
         } else {
             pb.set_message(format!("Failed to delete: {}", dep).red().to_string());
         }
+
         pb.tick();
     }
+
     pb.finish_with_message("Deletion complete!".green().to_string());
 
     if !deleted.is_empty() {
@@ -155,7 +148,7 @@ pub fn handle_unused_dependencies(
 /// Prompts the user to interactively select dependencies for deletion.
 ///
 /// Displays a multi-select interface where the user can choose which dependencies to delete from
-/// the provided list. All dependencies are selected by default.
+/// the provided list. All dependencies are unselected by default.
 ///
 /// # Arguments
 ///
@@ -175,7 +168,8 @@ pub fn handle_unused_dependencies(
 /// ```
 fn select_dependencies_interactively(unused_dependencies: &[String]) -> Vec<String> {
     println!("\n{}", "Select dependencies to delete:".cyan().bold());
-    let defaults = vec![true; unused_dependencies.len()];
+
+    let defaults = vec![false; unused_dependencies.len()];
     let selection = MultiSelect::with_theme(&ColorfulTheme::default())
         .items(unused_dependencies)
         .defaults(&defaults)
@@ -188,6 +182,7 @@ fn select_dependencies_interactively(unused_dependencies: &[String]) -> Vec<Stri
             .into_iter()
             .map(|i| unused_dependencies[i].clone())
             .collect(),
+
         None => Vec::new(),
     }
 }
@@ -218,11 +213,13 @@ fn confirm_all_deletion(unused_dependencies: &[String]) -> Vec<String> {
         "\n{}",
         "Confirm deletion of all unused dependencies? (y/n)".yellow()
     );
+
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
         .expect("Failed to read input");
-    if input.trim().to_lowercase() == "y" {
+
+    if input.trim().to_lowercase() == "y" || input.trim().to_lowercase() == "yes" {
         unused_dependencies.to_vec()
     } else {
         Vec::new()
@@ -254,8 +251,17 @@ fn confirm_all_deletion(unused_dependencies: &[String]) -> Vec<String> {
 /// }
 /// ```
 fn uninstall_dependency(dependency: &str, package_manager: &str) -> bool {
+    let command = match package_manager {
+        "npm" => "uninstall",
+        "pnpm" | "yarn" | "bun" => "remove",
+        _ => {
+            eprintln!("Unsupported package manager: {}", package_manager);
+            return false;
+        }
+    };
+
     let output = Command::new(package_manager)
-        .args(["uninstall", dependency])
+        .args([command, dependency])
         .output();
 
     matches!(output, Ok(result) if result.status.success())

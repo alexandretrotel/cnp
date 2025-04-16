@@ -185,6 +185,8 @@ pub fn scan_files(
 
                 Err(_) => {}
             }
+
+            pb.tick();
         }
     }
 
