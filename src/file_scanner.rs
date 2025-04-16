@@ -1,10 +1,12 @@
 use crate::config::{is_typescript_project, EXTENSIONS, IGNORE_FOLDERS, TYPESCRIPT_EXTENSIONS};
 use glob::glob;
 use indicatif::ProgressBar;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Command;
 
@@ -70,66 +72,37 @@ fn get_typescript_unused_imports() -> HashSet<String> {
 
     // Run tsc with --noEmit to get diagnostics
     let output = Command::new("tsc")
-        .args(["--noEmit", "--pretty", "false"])
+        .args(["--noEmit", "--pretty", "false", "--noUnusedLocals"])
         .output();
 
     match output {
-        Ok(output) if output.status.success() => {
-            // No errors, so no unused imports
-            return unused_imports;
-        }
+        Ok(output) if output.status.success() => return unused_imports,
+
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
+
             for line in stderr.lines() {
                 if line.contains("TS6133") {
                     // Example: "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
-                    if let Some(import_name) = extract_import_name(line) {
-                        unused_imports.insert(import_name);
+                    if let Some((file_path, line_number)) = extract_file_and_line(line) {
+                        if let Some(package_name) =
+                            extract_package_name_from_file_line(&file_path, line_number)
+                        {
+                            unused_imports.insert(package_name);
+                        }
                     }
                 }
             }
         }
-        Err(_) => {
-            // tsc failed (e.g., not installed), fall back to regex
-        }
-    }
-    unused_imports
-}
 
-/// Extracts the import name from a TypeScript TS6133 diagnostic message.
-///
-/// Parses a diagnostic message to retrieve the name of an unused import. Special cases are handled,
-/// such as mapping known imports (e.g., "analytics" to "@vercel/analytics").
-///
-/// # Arguments
-///
-/// * `diagnostic` - A string slice containing the TS6133 diagnostic message.
-///
-/// # Returns
-///
-/// Returns `Some(String)` with the extracted import name if parsing succeeds, or `None` if the
-/// diagnostic format is invalid or no name is found.
-///
-/// # Examples
-///
-/// ```
-/// let diagnostic = "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read.";
-/// if let Some(name) = extract_import_name(diagnostic) {
-///     println!("Unused import: {}", name); // Prints "Unused import: @vercel/analytics"
-/// }
-/// ```
-fn extract_import_name(diagnostic: &str) -> Option<String> {
-    let parts: Vec<&str> = diagnostic.split("'").collect();
-    if parts.len() >= 2 {
-        let name = parts[1].to_string();
-        // Map to package name (e.g., "analytics" -> "@vercel/analytics")
-        match name.as_str() {
-            "analytics" => Some("@vercel/analytics".to_string()),
-            _ => Some(name),
+        Err(_) => {
+            // tsc failed (e.g., not installed), fall back to regex, print a warning
+            eprintln!("Warning: Failed to run tsc. Unused imports may not be detected.");
+            return unused_imports;
         }
-    } else {
-        None
     }
+
+    unused_imports
 }
 
 /// Scans project files to identify used dependencies, explored files, and ignored files.
@@ -220,6 +193,7 @@ pub fn scan_files(
     for path in &typescript_files {
         if let Ok(content) = fs::read_to_string(path) {
             let found = find_dependencies_in_content(&content, dependencies);
+
             for dep in found {
                 if !unused_imports.contains(&dep) {
                     used_packages.insert(dep);
@@ -301,4 +275,132 @@ fn should_ignore(path: &Path) -> bool {
             .iter()
             .any(|folder| component.as_os_str() == OsStr::new(folder))
     })
+}
+
+/// Extracts the file path and line number from a TypeScript TS6133 diagnostic message.
+///
+///
+/// Parses a diagnostic message to retrieve the file path and line number where the unused import
+/// was detected. The function uses a regex pattern to match the expected format of the diagnostic.
+///
+/// # Arguments
+///
+/// * `diagnostic` - A string slice containing the TS6133 diagnostic message.
+///
+/// # Returns
+///
+///
+/// Returns `Some((String, usize))` with the extracted file path and line number if parsing succeeds,
+/// or `None` if the diagnostic format is invalid.
+///
+/// # Examples
+///
+/// ```
+/// let diagnostic = "src/file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read.";
+/// if let Some((file, line)) = extract_file_and_line(diagnostic) {
+///     println!("File: {}, Line: {}", file, line); // Prints "File: src/file.ts, Line: 1"
+/// }
+/// ```
+fn extract_file_and_line(diagnostic: &str) -> Option<(String, usize)> {
+    // Example line: "src/file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
+    static TS_REGEX: Lazy<Regex> = Lazy::new(|| {
+        // Escape and join the extensions into a regex group
+        let exts = TYPESCRIPT_EXTENSIONS
+            .iter()
+            .map(|ext| regex::escape(ext))
+            .collect::<Vec<_>>()
+            .join("|");
+
+        let pattern = format!(r"^(.*\.({}))\((\d+),\d+\)", exts);
+        Regex::new(&pattern).expect("Failed to compile regex")
+    });
+    let caps = TS_REGEX.captures(diagnostic)?;
+
+    let file_path = caps.get(1)?.as_str().to_string();
+    let line_number: usize = caps.get(3)?.as_str().parse().ok()?;
+
+    Some((file_path, line_number))
+}
+
+/// Extracts the package name from a specific line in a file.
+///
+///
+/// This function reads a specified line from a file and attempts to extract the package name
+/// from import statements. It uses regex patterns to match common import formats.
+///
+/// # Arguments
+///
+/// * `file_path` - A string slice representing the path to the file.
+/// * `line_number` - A `usize` representing the line number to read (1-based).
+///
+/// # Returns
+///
+///
+/// Returns `Some(String)` with the extracted package name if successful, or `None` if the line
+/// does not match expected formats or if the file cannot be read.
+///
+/// # Examples
+///
+/// ```
+/// let file_path = "src/file.ts";
+/// let line_number = 1;
+/// if let Some(package_name) = extract_package_name_from_file_line(file_path, line_number) {
+///     println!("Package name: {}", package_name); // Prints the extracted package name
+/// }
+/// ```
+fn extract_package_name_from_file_line(file_path: &str, line_number: usize) -> Option<String> {
+    let path = Path::new(file_path);
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    let total_lines = reader.lines().count();
+    if line_number == 0 || line_number > total_lines {
+        return None;
+    }
+
+    // Read the target line
+    let reader = BufReader::new(File::open(path).ok()?);
+    let import_line = reader.lines().nth(line_number - 1)?.ok()?;
+
+    // Skip if the line is empty or a comment
+    let import_line = import_line.trim();
+    if import_line.is_empty() || import_line.starts_with("//") || import_line.starts_with("/*") {
+        return None;
+    }
+
+    // Regex to handle import statements (named, default, namespace, combined, side-effect)
+    let re_named = Regex::new(r#"from\s+['"]([^'"\s]+)['"]"#).unwrap();
+    let re_default = Regex::new(r#"import\s+([^\s,]+)\s+from\s+['"]([^'"\s]+)['"]"#).unwrap();
+    let re_namespace =
+        Regex::new(r#"import\s+\*\s+as\s+([^\s]+)\s+from\s+['"]([^'"\s]+)['"]"#).unwrap();
+    let re_combined =
+        Regex::new(r#"import\s+([^\s,]+)\s*,\s*{([^}]+)}\s+from\s+['"]([^'"\s]+)['"]"#).unwrap();
+    let re_side_effect = Regex::new(r#"import\s+['"]([^'"\s]+)['"]"#).unwrap();
+
+    // Named imports like `import { X } from "some-package";`
+    if let Some(caps) = re_named.captures(import_line) {
+        return Some(caps[1].to_string());
+    }
+
+    // Default imports like `import some_package from "some-package";`
+    if let Some(caps) = re_default.captures(import_line) {
+        return Some(caps[2].to_string());
+    }
+
+    // Namespace imports like `import * as some_package from "some-package";`
+    if let Some(caps) = re_namespace.captures(import_line) {
+        return Some(caps[2].to_string());
+    }
+
+    // Combined imports like `import some_package, { X } from "some-package";`
+    if let Some(caps) = re_combined.captures(import_line) {
+        return Some(caps[3].to_string());
+    }
+
+    // Side-effect imports like `import "some-side-effect-package";`
+    if let Some(caps) = re_side_effect.captures(import_line) {
+        return Some(caps[1].to_string());
+    }
+
+    None
 }

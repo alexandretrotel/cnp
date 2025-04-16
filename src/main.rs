@@ -9,6 +9,7 @@ mod utils;
 #[cfg(test)]
 mod tests;
 
+use clap::{Arg, ArgAction, Command};
 use colored::*;
 use config::PACKAGE_JSON_PATH;
 use dependency::read_package_json;
@@ -53,11 +54,34 @@ use uninstall::handle_unused_dependencies;
 /// ```
 fn main() {
     // Parse command-line arguments
-    let args: Vec<String> = std::env::args().collect();
-    let dry_run = args.contains(&"--dry-run".to_string());
-    let interactive =
-        args.contains(&"--interactive".to_string()) || args.contains(&"-i".to_string());
-    let all = args.contains(&"--all".to_string()) || args.contains(&"-a".to_string());
+    let matches = Command::new("Dependency Analyzer")
+        .about("Analyze unused dependencies in a project")
+        .arg(
+            Arg::new("dry-run")
+                .long("dry-run")
+                .help("Simulate actions without making changes (e.g., no uninstalls)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("interactive")
+                .short('i')
+                .long("interactive")
+                .help("Prompt the user before taking actions on unused dependencies")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("all")
+                .short('a')
+                .long("all")
+                .help("Automatically process all unused dependencies without prompting")
+                .action(ArgAction::SetTrue),
+        )
+        .get_matches();
+
+    // Parse the arguments
+    let dry_run: bool = *matches.get_one("dry-run").unwrap_or(&false);
+    let interactive: bool = *matches.get_one("interactive").unwrap_or(&false);
+    let all: bool = *matches.get_one("all").unwrap_or(&false);
 
     // Initialize progress bar
     let pb = utils::create_spinner("Initializing...");
