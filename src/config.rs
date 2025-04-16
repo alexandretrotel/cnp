@@ -14,6 +14,7 @@ pub const IGNORE_FOLDERS: [&str; 10] = [
     "test",
     "output",
 ];
+pub const TYPESCRIPT_EXTENSIONS: [&str; 4] = ["ts", "tsx", "d.ts", "cts"];
 
 /// Checks if the current directory is a TypeScript project by looking for a `tsconfig.json` file.
 ///

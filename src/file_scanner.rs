@@ -1,4 +1,4 @@
-use crate::config::{is_typescript_project, EXTENSIONS, IGNORE_FOLDERS};
+use crate::config::{is_typescript_project, EXTENSIONS, IGNORE_FOLDERS, TYPESCRIPT_EXTENSIONS};
 use glob::glob;
 use indicatif::ProgressBar;
 use regex::Regex;
@@ -177,6 +177,7 @@ pub fn scan_files(
     for pattern in patterns {
         for entry in glob(&pattern).expect("Failed to read glob pattern") {
             pb.inc(1);
+
             match entry {
                 Ok(path) if !path.is_dir() && !path.is_symlink() => {
                     let abs_path = normalize_path(&path);
@@ -184,18 +185,23 @@ pub fn scan_files(
                         continue;
                     }
                     seen_paths.insert(abs_path.clone());
+
                     if should_ignore(&path) {
                         ignored_files.push(abs_path);
                         continue;
                     }
+
                     let extension = path.extension().and_then(OsStr::to_str);
-                    if extension == Some("ts") || extension == Some("tsx") {
+                    if extension.map_or(false, |ext| TYPESCRIPT_EXTENSIONS.contains(&ext)) {
                         typescript_files.push(abs_path.clone());
                     } else if let Ok(content) = fs::read_to_string(&path) {
                         used_packages.extend(find_dependencies_in_content(&content, dependencies));
+                        // deps from package.json only
                     }
+
                     explored_files.push(abs_path);
                 }
+
                 Ok(path) => {
                     let abs_path = normalize_path(&path);
                     if should_ignore(&path) && !seen_paths.contains(&abs_path) {
@@ -203,6 +209,7 @@ pub fn scan_files(
                         seen_paths.insert(abs_path);
                     }
                 }
+
                 Err(_) => {}
             }
         }
@@ -251,6 +258,7 @@ pub fn scan_files(
 /// ```
 fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -> HashSet<String> {
     let mut found = HashSet::new();
+
     for dep in dependencies {
         let dep_pattern = regex::escape(dep);
         let regex_str = format!(
@@ -263,6 +271,7 @@ fn find_dependencies_in_content(content: &str, dependencies: &HashSet<String>) -
             found.insert(dep.clone());
         }
     }
+
     found
 }
 
