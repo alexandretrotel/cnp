@@ -54,8 +54,8 @@ use uninstall::handle_unused_dependencies;
 /// ```
 fn main() {
     // Parse command-line arguments
-    let matches = Command::new("Dependency Analyzer")
-        .about("Analyze unused dependencies in a project")
+    let matches = Command::new("Check Node Packages")
+        .about("A utility tool written in Rust to check unused node packages.")
         .arg(
             Arg::new("dry-run")
                 .long("dry-run")

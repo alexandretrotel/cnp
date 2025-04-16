@@ -1,7 +1,7 @@
 use crate::package_manager::detect_package_manager;
 use crate::utils::{create_bar, create_spinner};
 use colored::*;
-use dialoguer::{theme::ColorfulTheme, MultiSelect};
+use dialoguer::{MultiSelect, theme::ColorfulTheme};
 use std::fs;
 use std::io::{self};
 use std::path::Path;

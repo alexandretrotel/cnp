@@ -1,4 +1,4 @@
-use crate::config::{is_typescript_project, EXTENSIONS, IGNORE_FOLDERS, TYPESCRIPT_EXTENSIONS};
+use crate::config::{EXTENSIONS, IGNORE_FOLDERS, TYPESCRIPT_EXTENSIONS, is_typescript_project};
 use glob::glob;
 use indicatif::ProgressBar;
 use once_cell::sync::Lazy;
