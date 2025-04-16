@@ -1,7 +1,7 @@
 use std::path::Path;
 
 pub const PACKAGE_JSON_PATH: &str = "package.json";
-pub const EXTENSIONS: [&str; 5] = ["js", "ts", "jsx", "tsx", "mdx"];
+pub const EXTENSIONS: [&str; 7] = ["js", "ts", "jsx", "tsx", "mdx", "cjs", "mjs"];
 pub const IGNORE_FOLDERS: [&str; 10] = [
     "node_modules",
     "dist",
