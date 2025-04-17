@@ -281,4 +281,36 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_read_cnpignore_with_no_valid_patterns() -> Result<(), Box<dyn Error>> {
+        // Create a temporary directory and file
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = PathBuf::from(temp_dir.path()).join(".cnpignore");
+        let mut file = fs::File::create(file_path).unwrap();
+
+        // Write only comment lines to the file
+        writeln!(file, "# This is a comment").unwrap();
+        writeln!(file, "# Another comment").unwrap();
+
+        // Read the patterns and assert the result is an empty set
+        let ignore_patterns = read_cnpignore(temp_dir.path().to_str().unwrap());
+        let expected_patterns: HashSet<String> = HashSet::new();
+
+        assert_eq!(ignore_patterns, expected_patterns);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_cnpignore_file_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = PathBuf::from(temp_dir.path()).join(".cnpignore");
+
+        // Attempt to read a file that does not exist
+        let ignore_patterns = read_cnpignore(file_path.to_str().unwrap());
+        let expected_patterns: HashSet<String> = HashSet::new();
+
+        assert_eq!(ignore_patterns, expected_patterns);
+    }
 }

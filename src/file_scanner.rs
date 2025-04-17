@@ -5,8 +5,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::fs::{self};
 use std::path::Path;
 use std::process::Command;
 
@@ -32,10 +31,11 @@ use std::process::Command;
 /// // On macOS, might return "/tmp/file.txt"
 /// println!("Normalized path: {}", normalized);
 /// ```
-fn normalize_path(path: &Path) -> String {
+pub fn normalize_path(path: &Path) -> String {
     let path_str = fs::canonicalize(path)
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| path.display().to_string());
+
     // On macOS, strip /private prefix if present
     if cfg!(target_os = "macos") && path_str.starts_with("/private") {
         path_str.replacen("/private", "", 1)
@@ -46,12 +46,12 @@ fn normalize_path(path: &Path) -> String {
 
 /// Runs the TypeScript compiler (`tsc`) to detect unused imports (TS6133 errors).
 ///
-/// This function executes `tsc --noEmit --pretty false` to collect diagnostics for unused imports
+/// This function executes `tsc` to collect diagnostics for unused imports
 /// in a TypeScript project. If `tsc` fails or no TypeScript project is detected, it returns an empty set.
 ///
 /// # Arguments
 ///
-/// * `package_json_path` - A string slice representing the path to the `package.json` file.
+/// * `dir_path` - A string slice representing the path to the `package.json` file.
 ///
 /// # Returns
 ///
@@ -68,41 +68,49 @@ fn normalize_path(path: &Path) -> String {
 ///     println!("No unused imports detected.");
 /// }
 /// ```
-fn get_typescript_unused_imports(package_json_path: &str) -> HashSet<String> {
+pub fn get_typescript_unused_imports(dir_path: &str) -> HashSet<String> {
     let mut unused_imports = HashSet::new();
-    if !is_typescript_project(&package_json_path) {
+    if !is_typescript_project(&dir_path) {
         return unused_imports;
     }
 
-    // Run tsc with --noEmit to get diagnostics
-    let output = Command::new("tsc")
-        .args(["--noEmit", "--pretty", "false", "--noUnusedLocals"])
-        .output();
+    // Search for all files in the directory matching with typescript extensions
+    let extensions = TYPESCRIPT_EXTENSIONS.join(",");
+    let pattern = format!("**/*.{{{extensions}}}", extensions = extensions);
 
-    match output {
-        Ok(output) if output.status.success() => return unused_imports,
+    // Convert the pattern to a PathBuf for use with the glob crate
+    let path_pattern = Path::new(&pattern);
 
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+    // Walk through the directory matching the pattern
+    for entry in glob::glob(&path_pattern.to_string_lossy().to_string()).unwrap() {
+        println!("{}", entry.is_ok().to_string());
+        match entry {
+            Ok(path) if !path.is_dir() && !path.is_symlink() => {
+                let output = Command::new("tsc")
+                    .args(["--noEmit", "--pretty", "false"])
+                    .stderr(std::process::Stdio::piped())
+                    .current_dir(&path.parent().unwrap_or(Path::new("./")))
+                    .output()
+                    .expect("Failed to run tsc");
 
-            for line in stderr.lines() {
-                if line.contains("TS6133") {
-                    // Example: "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
-                    if let Some((file_path, line_number)) = extract_file_and_line(line) {
-                        if let Some(package_name) =
-                            extract_package_name_from_file_line(&file_path, line_number)
-                        {
-                            unused_imports.insert(package_name);
+                if output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    for line in stderr.lines() {
+                        if line.contains("TS6133") {
+                            // Example: "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
+                            if let Some((file_path, _line_number)) = extract_file_and_line(line) {
+                                unused_imports.insert(file_path);
+                            }
                         }
                     }
+                } else {
+                    eprintln!("tsc failed with exit code: {}", output.status);
                 }
             }
-        }
 
-        Err(_) => {
-            // tsc failed (e.g., not installed), fall back to regex, print a warning
-            eprintln!("Warning: Failed to run tsc. Unused imports may not be detected.");
-            return unused_imports;
+            Ok(_) => continue,
+
+            Err(e) => eprintln!("Failed to read entry: {}", e),
         }
     }
 
@@ -326,87 +334,4 @@ fn extract_file_and_line(diagnostic: &str) -> Option<(String, usize)> {
     let line_number: usize = caps.get(3)?.as_str().parse().ok()?;
 
     Some((file_path, line_number))
-}
-
-/// Extracts the package name from a specific line in a file.
-///
-///
-/// This function reads a specified line from a file and attempts to extract the package name
-/// from import statements. It uses regex patterns to match common import formats.
-///
-/// # Arguments
-///
-/// * `file_path` - A string slice representing the path to the file.
-/// * `line_number` - A `usize` representing the line number to read (1-based).
-///
-/// # Returns
-///
-///
-/// Returns `Some(String)` with the extracted package name if successful, or `None` if the line
-/// does not match expected formats or if the file cannot be read.
-///
-/// # Examples
-///
-/// ```
-/// let file_path = "src/file.ts";
-/// let line_number = 1;
-/// if let Some(package_name) = extract_package_name_from_file_line(file_path, line_number) {
-///     println!("Package name: {}", package_name); // Prints the extracted package name
-/// }
-/// ```
-fn extract_package_name_from_file_line(file_path: &str, line_number: usize) -> Option<String> {
-    let path = Path::new(file_path);
-    let file = File::open(path).ok()?;
-    let reader = BufReader::new(file);
-
-    let total_lines = reader.lines().count();
-    if line_number == 0 || line_number > total_lines {
-        return None;
-    }
-
-    // Read the target line
-    let reader = BufReader::new(File::open(path).ok()?);
-    let import_line = reader.lines().nth(line_number - 1)?.ok()?;
-
-    // Skip if the line is empty or a comment
-    let import_line = import_line.trim();
-    if import_line.is_empty() || import_line.starts_with("//") || import_line.starts_with("/*") {
-        return None;
-    }
-
-    // Regex to handle import statements (named, default, namespace, combined, side-effect)
-    let re_named = Regex::new(r#"from\s+['"]([^'"\s]+)['"]"#).unwrap();
-    let re_default = Regex::new(r#"import\s+([^\s,]+)\s+from\s+['"]([^'"\s]+)['"]"#).unwrap();
-    let re_namespace =
-        Regex::new(r#"import\s+\*\s+as\s+([^\s]+)\s+from\s+['"]([^'"\s]+)['"]"#).unwrap();
-    let re_combined =
-        Regex::new(r#"import\s+([^\s,]+)\s*,\s*{([^}]+)}\s+from\s+['"]([^'"\s]+)['"]"#).unwrap();
-    let re_side_effect = Regex::new(r#"import\s+['"]([^'"\s]+)['"]"#).unwrap();
-
-    // Named imports like `import { X } from "some-package";`
-    if let Some(caps) = re_named.captures(import_line) {
-        return Some(caps[1].to_string());
-    }
-
-    // Default imports like `import some_package from "some-package";`
-    if let Some(caps) = re_default.captures(import_line) {
-        return Some(caps[2].to_string());
-    }
-
-    // Namespace imports like `import * as some_package from "some-package";`
-    if let Some(caps) = re_namespace.captures(import_line) {
-        return Some(caps[2].to_string());
-    }
-
-    // Combined imports like `import some_package, { X } from "some-package";`
-    if let Some(caps) = re_combined.captures(import_line) {
-        return Some(caps[3].to_string());
-    }
-
-    // Side-effect imports like `import "some-side-effect-package";`
-    if let Some(caps) = re_side_effect.captures(import_line) {
-        return Some(caps[1].to_string());
-    }
-
-    None
 }

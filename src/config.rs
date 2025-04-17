@@ -19,7 +19,7 @@ pub const TYPESCRIPT_EXTENSIONS: [&str; 4] = ["ts", "tsx", "d.ts", "cts"];
 /// Checks if the current directory is a TypeScript project by looking for a `tsconfig.json` file.
 ///
 /// # Arguments
-/// * `path` - A string slice representing the path to the directory to check.
+/// * `dir_path` - A string slice representing the path to the directory to check.
 ///
 /// # Returns
 ///
@@ -35,6 +35,6 @@ pub const TYPESCRIPT_EXTENSIONS: [&str; 4] = ["ts", "tsx", "d.ts", "cts"];
 ///     println!("This is not a TypeScript project.");
 /// }
 /// ```
-pub fn is_typescript_project(path: &str) -> bool {
-    Path::new(&path).join("tsconfig.json").exists()
+pub fn is_typescript_project(dir_path: &str) -> bool {
+    Path::new(&dir_path).join("tsconfig.json").exists()
 }
