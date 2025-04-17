@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::dependency::{get_required_dependencies, read_package_json};
+    use crate::dependency::{get_required_dependencies, read_cnpignore, read_package_json};
     use colored::Colorize;
-    use std::fs;
+    use std::io::Write;
+    use std::{collections::HashSet, error::Error, fs, path::PathBuf};
     use tempfile::TempDir;
 
     #[test]
@@ -248,10 +249,36 @@ mod tests {
 
         // Check that both dependencies and devDependencies are returned
         let deps = get_required_dependencies(temp_dir.path().to_str().unwrap());
-        println!("Dependencies: {:?}", deps);
 
         assert!(!deps.is_empty());
         assert_eq!(deps.len(), 2);
         assert!(deps.contains("@dep1"));
+    }
+
+    #[test]
+    fn test_read_cnpignore_with_valid_patterns() -> Result<(), Box<dyn Error>> {
+        // Create a temporary directory and file
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = PathBuf::from(temp_dir.path()).join(".cnpignore");
+        let mut file = fs::File::create(file_path.clone()).unwrap();
+
+        // Write valid patterns to the file
+        writeln!(file, "# This is a comment").unwrap();
+        writeln!(file, "pattern1").unwrap();
+        writeln!(file, "").unwrap(); // Empty line
+        writeln!(file, "  pattern2 ").unwrap();
+        writeln!(file, "pattern3# This is an inline comment").unwrap();
+
+        // Read the patterns and assert they match expected values
+        let ignore_patterns = read_cnpignore(&file_path.to_str().unwrap());
+        let expected_patterns = HashSet::from([
+            "pattern1".to_string(),
+            "pattern2".to_string(),
+            "pattern3".to_string(),
+        ]);
+
+        assert_eq!(ignore_patterns, expected_patterns);
+
+        Ok(())
     }
 }

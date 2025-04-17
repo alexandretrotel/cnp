@@ -99,7 +99,8 @@ fn main() {
     // Identify unused dependencies
     let dir_path = std::env::current_dir().unwrap_or_default();
     let required_deps = dependency::get_required_dependencies(dir_path.to_str().unwrap());
-    let ignored_deps = dependency::read_cnpignore();
+    let cnp_ignore_path = dir_path.join(".cnpignore");
+    let ignored_deps = dependency::read_cnpignore(cnp_ignore_path.to_str().unwrap_or_default());
     let unused_dependencies: Vec<_> = dependencies
         .difference(&used_packages)
         .filter(|dep| !required_deps.contains(*dep) && !ignored_deps.contains(*dep))

@@ -228,6 +228,10 @@ pub fn get_required_dependencies(dir_path: &str) -> HashSet<String> {
 /// The function parses the `.cnpignore` file, ignoring empty lines, lines starting with `#`,
 /// and inline comments (text after `#`). If the file is not found, an empty set is returned.
 ///
+/// # Arguments
+///
+/// * `path` - A string slice representing the path to the `.cnpignore` file.
+///
 /// # Returns
 ///
 /// Returns a `HashSet<String>` containing the trimmed, non-empty, non-comment lines from
@@ -243,8 +247,8 @@ pub fn get_required_dependencies(dir_path: &str) -> HashSet<String> {
 ///     println!("No .cnpignore patterns found.");
 /// }
 /// ```
-pub fn read_cnpignore() -> HashSet<String> {
-    fs::read_to_string(".cnpignore")
+pub fn read_cnpignore(path: &str) -> HashSet<String> {
+    fs::read_to_string(path)
         .map(|content| {
             content
                 .lines()
