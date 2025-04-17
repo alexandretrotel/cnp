@@ -1,0 +1,14 @@
+{
+  "name": "test-node-project",
+  "version": "1.0.0",
+  "description": "Test project for cnp",
+  "dependencies": {
+    "react": "^18.2.0",
+    "@vercel/analytics": "^1.0.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

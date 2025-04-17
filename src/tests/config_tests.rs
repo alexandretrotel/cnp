@@ -29,4 +29,37 @@ mod tests {
         // Call the function and assert it returns false
         assert!(!is_typescript_project(&temp_dir.path().to_string_lossy()));
     }
+
+    #[test]
+    fn it_returns_true_for_symlink_to_tsconfig() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a symlink to tsconfig.json in another directory
+        let target_path = temp_dir.path().join("target.txt");
+        File::create(&target_path).unwrap();
+
+        std::os::unix::fs::symlink(target_path, temp_dir.path().join("tsconfig.json")).unwrap();
+
+        assert!(is_typescript_project(&temp_dir.path().to_string_lossy()));
+    }
+
+    #[test]
+    fn it_returns_false_for_symlink_to_nonexistent_tsconfig() {
+        let temp_dir = TempDir::new().unwrap();
+
+        std::os::unix::fs::symlink("/nonexistent/path", temp_dir.path().join("tsconfig.json"))
+            .unwrap();
+
+        assert!(!is_typescript_project(&temp_dir.path().to_string_lossy()));
+    }
+
+    #[test]
+    fn it_returns_false_for_symlink_to_wrong_extension() {
+        let temp_dir = TempDir::new().unwrap();
+
+        std::os::unix::fs::symlink("wrong-extension.ts", temp_dir.path().join("tsconfig.json"))
+            .unwrap();
+
+        assert!(!is_typescript_project(&temp_dir.path().to_string_lossy()));
+    }
 }
