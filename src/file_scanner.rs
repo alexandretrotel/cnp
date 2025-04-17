@@ -49,6 +49,10 @@ fn normalize_path(path: &Path) -> String {
 /// This function executes `tsc --noEmit --pretty false` to collect diagnostics for unused imports
 /// in a TypeScript project. If `tsc` fails or no TypeScript project is detected, it returns an empty set.
 ///
+/// # Arguments
+///
+/// * `package_json_path` - A string slice representing the path to the `package.json` file.
+///
 /// # Returns
 ///
 /// Returns a `HashSet<String>` containing the names of unused imports identified by TS6133 errors.
@@ -64,9 +68,9 @@ fn normalize_path(path: &Path) -> String {
 ///     println!("No unused imports detected.");
 /// }
 /// ```
-fn get_typescript_unused_imports() -> HashSet<String> {
+fn get_typescript_unused_imports(package_json_path: &str) -> HashSet<String> {
     let mut unused_imports = HashSet::new();
-    if !is_typescript_project() {
+    if !is_typescript_project(&package_json_path) {
         return unused_imports;
     }
 
@@ -191,7 +195,7 @@ pub fn scan_files(
     }
 
     // Process TypeScript files with tsc
-    let unused_imports = get_typescript_unused_imports();
+    let unused_imports = get_typescript_unused_imports("package.json");
     for path in &typescript_files {
         if let Ok(content) = fs::read_to_string(path) {
             let found = find_dependencies_in_content(&content, dependencies);
