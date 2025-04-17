@@ -75,42 +75,41 @@ pub fn get_typescript_unused_imports(dir_path: &str) -> HashSet<String> {
     }
 
     // Search for all files in the directory matching with typescript extensions
-    let extensions = TYPESCRIPT_EXTENSIONS.join(",");
-    let pattern = format!("**/*.{{{extensions}}}", extensions = extensions);
+    for ext in &TYPESCRIPT_EXTENSIONS {
+        let pattern = format!("{}/**/*.{}", dir_path, ext);
 
-    // Convert the pattern to a PathBuf for use with the glob crate
-    let path_pattern = Path::new(&pattern);
+        // Walk through the directory matching the pattern
+        for entry in glob(&pattern).unwrap() {
+            match entry {
+                Ok(path) if !path.is_dir() && !path.is_symlink() => {
+                    // TODO
+                    let output = Command::new("tsc")
+                        .args(["--noEmit", "--pretty", "false", &path.to_str().unwrap()])
+                        .stderr(std::process::Stdio::piped())
+                        .current_dir(&path.parent().unwrap_or(Path::new("./")))
+                        .output()
+                        .expect("Failed to run tsc");
 
-    // Walk through the directory matching the pattern
-    for entry in glob::glob(&path_pattern.to_string_lossy().to_string()).unwrap() {
-        println!("{}", entry.is_ok().to_string());
-        match entry {
-            Ok(path) if !path.is_dir() && !path.is_symlink() => {
-                let output = Command::new("tsc")
-                    .args(["--noEmit", "--pretty", "false"])
-                    .stderr(std::process::Stdio::piped())
-                    .current_dir(&path.parent().unwrap_or(Path::new("./")))
-                    .output()
-                    .expect("Failed to run tsc");
-
-                if output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    for line in stderr.lines() {
-                        if line.contains("TS6133") {
-                            // Example: "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
-                            if let Some((file_path, _line_number)) = extract_file_and_line(line) {
-                                unused_imports.insert(file_path);
+                    if output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        for line in stderr.lines() {
+                            if line.contains("TS6133") {
+                                // Example: "file.ts(1,8): error TS6133: 'analytics' is declared but its value is never read."
+                                if let Some((file_path, _line_number)) = extract_file_and_line(line)
+                                {
+                                    unused_imports.insert(file_path);
+                                }
                             }
                         }
+                    } else {
+                        eprintln!("tsc failed with exit code: {}", output.status);
                     }
-                } else {
-                    eprintln!("tsc failed with exit code: {}", output.status);
                 }
+
+                Ok(_) => continue,
+
+                Err(e) => eprintln!("Failed to read entry: {}", e),
             }
-
-            Ok(_) => continue,
-
-            Err(e) => eprintln!("Failed to read entry: {}", e),
         }
     }
 
