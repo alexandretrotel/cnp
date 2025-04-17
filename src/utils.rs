@@ -1,4 +1,5 @@
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::Path;
 
 /// Creates a spinner-style progress bar with a custom message.
 ///
@@ -64,4 +65,40 @@ pub fn create_bar(len: u64, message: &str) -> ProgressBar {
     );
     pb.set_message(message.to_string());
     pb
+}
+
+/// Extracts the file name and extension from a given file path.
+///
+/// This function takes a file path as a string and returns an `Option` containing a tuple with the
+/// file name and its extension. If the file name or extension cannot be determined, it returns `None`.
+/// The file name is the last component of the path, and the extension is the part after the last dot.
+/// If the path does not have a valid file name or extension, it returns `None`.
+///
+/// # Arguments
+///
+/// * `path` - A string slice representing the file path.
+///
+/// # Returns
+///
+/// Returns an `Option<(String, String)>` where the first element is the file name and the second
+/// element is the file extension. If either cannot be determined, returns `None`.
+///
+/// # Examples
+///
+/// ```
+/// let path = "/path/to/file.txt";
+/// if let Some((name, ext)) = get_file_name_and_extension(path) {
+///     println!("File name: {}, Extension: {}", name, ext);
+/// } else {
+///     println!("Could not extract file name or extension.");
+/// }
+/// ```
+pub fn get_file_name_and_extension(path: &str) -> Option<(String, String)> {
+    let path = Path::new(path);
+    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+            return Some((file_name.to_string(), extension.to_string()));
+        }
+    }
+    None
 }

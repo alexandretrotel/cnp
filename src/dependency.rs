@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+use crate::utils::get_file_name_and_extension;
+
 /// Reads and parses a `package.json` file into a JSON value.
 ///
 /// # Arguments
@@ -24,7 +26,9 @@ use std::path::Path;
 /// }
 /// ```
 pub fn read_package_json(path: &str) -> Result<Value, String> {
-    let content = fs::read_to_string(path).map_err(|_| format!("Error: `{}` not found.", path))?;
+    let file_name_and_extension = get_file_name_and_extension(path).unwrap_or_default();
+    let content = fs::read_to_string(path)
+        .map_err(|_| format!("Error: `{}` not found.", file_name_and_extension.0))?;
     serde_json::from_str(&content).map_err(|_| "Error: Invalid JSON in package.json.".to_string())
 }
 
