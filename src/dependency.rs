@@ -137,7 +137,10 @@ pub fn get_required_dependencies(dir_path: &str) -> HashSet<String> {
             "yarn.lock" => {
                 if let Ok(content) = fs::read_to_string(yarn_lock_path) {
                     for line in content.lines() {
-                        if line.ends_with(':') && !line.starts_with('#') && !line.trim().is_empty()
+                        if line.ends_with(':')
+                            && !line.starts_with('#')
+                            && !line.trim().is_empty()
+                            && !line.trim().contains("dependencies:")
                         {
                             let dep = line.trim_end_matches(':').trim();
                             let package_name = dep
@@ -168,6 +171,11 @@ pub fn get_required_dependencies(dir_path: &str) -> HashSet<String> {
                         {
                             for key in deps.keys() {
                                 if let Some(key_str) = key.as_str() {
+                                    if key_str.contains("dependencies")
+                                        || key_str.contains("devDependencies")
+                                    {
+                                        continue;
+                                    }
                                     required.insert(key_str.to_string());
                                 }
                             }
@@ -178,28 +186,36 @@ pub fn get_required_dependencies(dir_path: &str) -> HashSet<String> {
             // bun.lock
             "bun.lock" => {
                 if let Ok(content) = fs::read_to_string(bun_lock_path) {
-                    if let Ok(lock) = serde_json::from_str::<Value>(&content) {
-                        if let Some(workspaces) = lock
-                            .get("workspaces")
-                            .and_then(|v| v.get(""))
-                            .and_then(Value::as_object)
-                        {
-                            if let Some(deps) =
-                                workspaces.get("dependencies").and_then(Value::as_object)
-                            {
-                                required.extend(deps.keys().cloned());
+                    let mut lines = content.lines();
+
+                    fn extract_packages<'a, I>(lines: &mut I, required: &mut HashSet<String>)
+                    where
+                        I: Iterator<Item = &'a str>,
+                    {
+                        while let Some(line) = lines.next() {
+                            if line.contains("}") {
+                                break;
                             }
 
-                            if let Some(dev_deps) =
-                                workspaces.get("devDependencies").and_then(Value::as_object)
-                            // TODO: review the devDependencies logic
-                            {
-                                required.extend(dev_deps.keys().cloned());
+                            if let Some((package, _)) = line.split_once(':') {
+                                let package_name = package.trim().trim_matches('"');
+                                if !package_name.is_empty() {
+                                    required.insert(package_name.to_string());
+                                }
                             }
+                        }
+                    }
+
+                    while let Some(line) = lines.next() {
+                        if line.contains("dependencies") {
+                            extract_packages(&mut lines, &mut required);
+                        } else if line.contains("devDependencies") {
+                            extract_packages(&mut lines, &mut required);
                         }
                     }
                 }
             }
+
             _ => {}
         }
     }
