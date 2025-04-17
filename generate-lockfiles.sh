@@ -101,20 +101,26 @@ clean_dir
 # Generate bun lock file
 echo "Generating bun.lock..."
 bun install
-mv bun.lock bun-lock-test.lock
+mv bun.lock bun-test.lock
 clean_dir
 
 # Move lock files and fixture files to project root
-mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts aliased.js unused.ts tsconfig.json package.json "$OLDPWD"
+mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-test.lock index.js utils.ts aliased.js unused.ts tsconfig.json package.json "$OLDPWD"
 echo "Lock files and fixture files generated in $(pwd)"
 
 # Clean up
 cd "$OLDPWD"
 rm -rf "$TEMP_DIR"
 
+# Rename lock files to remove test suffix
+mv package-lock-test.json package-lock.json
+mv yarn-test.lock yarn.lock
+mv pnpm-lock-test.yaml pnpm-lock.yaml
+mv bun-test.lock bun.lock
+
 # Move lock files and fixture files to test_fixtures directory
 mkdir -p test_fixtures
-mv package-lock-test.json yarn-test.lock pnpm-lock-test.yaml bun-lock-test.lock index.js utils.ts aliased.js unused.ts tsconfig.json package.json test_fixtures/
+mv package-lock.json yarn.lock pnpm-lock.yaml bun.lock index.js utils.ts aliased.js unused.ts tsconfig.json package.json test_fixtures/
 
 # Print success message
 echo "Lock files and fixture files generated and moved to test_fixtures directory."

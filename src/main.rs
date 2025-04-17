@@ -97,7 +97,8 @@ fn main() {
     pb.finish_with_message("Scanning complete!".green().to_string());
 
     // Identify unused dependencies
-    let required_deps = dependency::get_required_dependencies();
+    let dir_path = std::env::current_dir().unwrap_or_default();
+    let required_deps = dependency::get_required_dependencies(dir_path.to_str().unwrap());
     let ignored_deps = dependency::read_cnpignore();
     let unused_dependencies: Vec<_> = dependencies
         .difference(&used_packages)

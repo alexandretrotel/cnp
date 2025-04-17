@@ -38,6 +38,10 @@ pub fn read_package_json(path: &str) -> Result<Value, String> {
 /// `pnpm-lock.yaml`, `bun.lock`) to gather dependencies. If multiple lockfiles are detected,
 /// it warns the user and returns an empty set to avoid ambiguity.
 ///
+/// # Arguments
+///
+/// * `dir_path` - A string slice representing the path to the project directory.
+///
 /// # Returns
 ///
 /// Returns a `HashSet<String>` containing the names of all required dependencies (from
@@ -54,13 +58,24 @@ pub fn read_package_json(path: &str) -> Result<Value, String> {
 ///     println!("No dependencies found or multiple lockfiles detected.");
 /// }
 /// ```
-pub fn get_required_dependencies() -> HashSet<String> {
+pub fn get_required_dependencies(dir_path: &str) -> HashSet<String> {
     let mut required = HashSet::new();
+
+    // Define paths for lockfiles
+    let package_lock_json_path = Path::new(dir_path).join("package-lock.json");
+    let yarn_lock_path = Path::new(dir_path).join("yarn.lock");
+    let pnpm_lock_yaml_path = Path::new(dir_path).join("pnpm-lock.yaml");
+    let bun_lock_path = Path::new(dir_path).join("bun.lock");
+
+    // Check for the existence of lockfiles
     let lockfiles = [
-        ("package-lock.json", Path::new("package-lock.json").exists()),
-        ("yarn.lock", Path::new("yarn.lock").exists()),
-        ("pnpm-lock.yaml", Path::new("pnpm-lock.yaml").exists()),
-        ("bun.lock", Path::new("bun.lock").exists()),
+        (
+            "package-lock.json",
+            Path::new(&package_lock_json_path).exists(),
+        ),
+        ("yarn.lock", Path::new(&yarn_lock_path).exists()),
+        ("pnpm-lock.yaml", Path::new(&pnpm_lock_yaml_path).exists()),
+        ("bun.lock", Path::new(&bun_lock_path).exists()),
     ];
 
     let existing_lockfiles: Vec<&str> = lockfiles
@@ -78,7 +93,8 @@ pub fn get_required_dependencies() -> HashSet<String> {
     }
 
     // Process package.json first to ensure top-level dependencies are included
-    if let Ok(package_json) = read_package_json("package.json") {
+    let package_json_path = Path::new(dir_path).join("package.json");
+    if let Ok(package_json) = read_package_json(package_json_path.to_str().unwrap()) {
         if let Some(deps) = package_json.get("dependencies").and_then(Value::as_object) {
             required.extend(deps.keys().cloned());
         }
@@ -97,7 +113,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
         match *lockfile {
             // package-lock.json
             "package-lock.json" => {
-                if let Ok(content) = fs::read_to_string("package-lock.json") {
+                if let Ok(content) = fs::read_to_string(package_lock_json_path) {
                     if let Ok(lock) = serde_json::from_str::<Value>(&content) {
                         if let Some(packages) = lock.get("packages").and_then(Value::as_object) {
                             for key in packages.keys() {
@@ -119,7 +135,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
             }
             // yarn.lock
             "yarn.lock" => {
-                if let Ok(content) = fs::read_to_string("yarn.lock") {
+                if let Ok(content) = fs::read_to_string(yarn_lock_path) {
                     for line in content.lines() {
                         if line.ends_with(':') && !line.starts_with('#') && !line.trim().is_empty()
                         {
@@ -143,7 +159,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
             }
             // pnpm-lock.yaml
             "pnpm-lock.yaml" => {
-                if let Ok(content) = fs::read_to_string("pnpm-lock.yaml") {
+                if let Ok(content) = fs::read_to_string(pnpm_lock_yaml_path) {
                     if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
                         if let Some(deps) = yaml
                             .get("dependencies")
@@ -161,7 +177,7 @@ pub fn get_required_dependencies() -> HashSet<String> {
             }
             // bun.lock
             "bun.lock" => {
-                if let Ok(content) = fs::read_to_string(lockfile) {
+                if let Ok(content) = fs::read_to_string(bun_lock_path) {
                     if let Ok(lock) = serde_json::from_str::<Value>(&content) {
                         if let Some(workspaces) = lock
                             .get("workspaces")
